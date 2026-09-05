@@ -5,7 +5,7 @@ intent_score. More wins from a source => its future leads score higher.
 
 Writes crawler/weights.json (an overlay load_config() merges over config.yaml
 defaults), so hand-set defaults and comments stay intact. Sources with too few
-decided leads keep their default weight — small samples don't move the dial.
+decided leads keep their default weight; small samples don't move the dial.
 
 ponytail: linear win-rate->weight heuristic. Swap for a trained model once
 enough outcomes exist (plan Phase 9 "later"); the overlay interface won't change.

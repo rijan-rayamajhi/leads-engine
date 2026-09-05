@@ -149,6 +149,7 @@ def run(limit=None):
                 "update raw_signals set judged_at=now(), service=%s, intent=%s, "
                 "intent_score=%s, summary=%s, why_contact=%s where id=%s", u)
     print(f"  {len(updates)} scored by LLM")
+    return len(updates)
 
 
 def _selftest():

@@ -73,6 +73,7 @@ def run():
             c.execute("update companies set enriched_at=now() where id=%s", (cid,))
             c.execute("update raw_signals set company_id=%s where id=%s", (cid, e["sid"]))
     print(f"  {len(enriched)} companies upserted + linked")
+    return len(enriched)
 
 
 if __name__ == "__main__":

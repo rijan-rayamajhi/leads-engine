@@ -51,6 +51,7 @@ def run(dupe_threshold=92):
             else:
                 seen.append((cid, name))
     print(f"verified: {checked} phones checked, {merged} duplicate companies merged")
+    return checked
 
 
 def _selftest():

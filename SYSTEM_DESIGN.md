@@ -190,7 +190,7 @@ API routes: `GET /api/leads` (filtered), `PATCH /api/leads/:id` (status/assignme
 
 ## 9. FEEDBACK — learning loop
 
-Every status change → `outcomes(lead_id, rep_email, status, notes, updated_at)`.
+Every status change → `outcomes(lead_id, user_email, status, notes, updated_at)`.
 
 Nightly GitHub Action:
 - win-rate per **source**, **service**, **score band**.
@@ -234,7 +234,7 @@ create table leads (
 create table outcomes (
   id bigserial primary key,
   lead_id uuid references leads(id),
-  rep_email text, status text, notes text,
+  user_email text, status text, notes text,
   updated_at timestamptz default now()
 );
 

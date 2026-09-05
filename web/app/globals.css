@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Lead Engine design tokens, light translation of the reference:
+   pastels are FILLS ONLY, text is always ink. Chunky radii + pills + one
+   soft shadow (no borders) carry the look. */
+@theme {
+  --font-sans: var(--font-urbanist), ui-sans-serif, system-ui, sans-serif;
+
+  --color-bg:      #F4F4F2;  /* page ground */
+  --color-surface: #FFFFFF;  /* cards */
+  --color-sunken:  #FAFAF8;  /* tab strips, inset rows */
+  --color-ink:     #1E1E1E;
+  --color-muted:   #6E6E73;
+  --color-line:    #E8E8E4;
+
+  --color-hot:  #FFF87C;     /* HOT bucket */
+  --color-warm: #D5BEF2;     /* WARM */
+  --color-cool: #87D3E3;     /* QUALIFIED */
+  --color-won:  #7AFFA1;     /* won / positive / active nav */
+  --color-lost: #FFB4B4;     /* lost */
+
+  --radius-card: 24px;
+  --radius-pill: 999px;
+
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+  --shadow-pop:  0 2px 4px rgb(0 0 0 / 0.05), 0 16px 40px rgb(0 0 0 / 0.10);
+}
+
+html { color-scheme: light; }
+body { background: var(--color-bg); color: var(--color-ink); }
+
+/* Urbanist 300 is for display numerals only; it goes illegible below ~32px. */
+.numeral { font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+
+/* Fallback focus ring for anything that does not define its own (links, icon
+   buttons, nav). It sits in the base layer so a control with its own focus
+   treatment overrides it rather than drawing a second indicator on top. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}

@@ -6,3 +6,5 @@ web/node_modules/
 web/.next/
 .env*.local
 web/.env.local
+.serena/
+web/tsconfig.tsbuildinfo

@@ -1,6 +1,6 @@
 """GAP detector: turn harvested businesses into leads by VERIFIABLE digital gaps.
 
-No LLM needed — the gap is a fact:
+No LLM needed, the gap is a fact:
   no website          -> needs a website        (strongest)
   social-only page    -> needs a real website
 Score rises with how established the business is (rating x review_count): a
@@ -18,9 +18,9 @@ SOCIAL = ("facebook.com", "instagram.com", "linktr.ee", "linktree")
 
 def classify_gap(website):
     if not website:
-        return ("website", "No website — invisible to customers searching online.")
+        return ("website", "No website, so customers searching online never find them.")
     if any(s in website.lower() for s in SOCIAL):
-        return ("website", "Only a social page — no real website to sell/book on.")
+        return ("website", "Only a social page, with no real website to sell or book on.")
     return (None, None)  # has a proper site
 
 
@@ -47,6 +47,21 @@ def run():
     cfg = load_config()
     th = cfg["thresholds"]
     with db.conn() as c:
+        run_id = db.start_run(c, "gap", cfg["city"])
+    try:
+        created = _run(cfg)
+    except Exception as e:
+        with db.conn() as c:
+            db.finish_run(c, run_id, error=f"{type(e).__name__}: {e}")
+        raise
+    with db.conn() as c:
+        db.finish_run(c, run_id, leads_new=created, stats={"leads": created})
+    return created
+
+
+def _run(cfg):
+    th, city = cfg["thresholds"], cfg["city"]
+    with db.conn() as c:
         rows = c.execute("""
             select distinct on (raw->>'place_id')
                 who, raw->>'place_id', raw->>'website', raw->>'phone',
@@ -71,7 +86,7 @@ def run():
             s = score(rating, rc, social_only)
             cid = db.upsert_company(c, who.lower().strip(), place_id=pid, phone=phone,
                                     website=website, category=cat, rating=rating,
-                                    review_count=rc)
+                                    review_count=rc, city=city)
             evidence = (f"{cat or 'Business'}, {rating or '?'}★ ({rc or 0} reviews), "
                         f"{'social page only' if social_only else 'no website found'}")
             db.insert_lead(
@@ -79,7 +94,7 @@ def run():
                 what_they_want=("Needs a real website" if not social_only
                                 else "Needs a website beyond social media"),
                 evidence_quote=evidence, why_contact=pitch,
-                source="google_maps_gap", source_url=url,
+                source="google_maps_gap", source_url=url, city=city,
                 intent_score=s, bucket=bucket_for(s, th))
             created += 1
     print(f"GAP: {created} website-gap leads created")

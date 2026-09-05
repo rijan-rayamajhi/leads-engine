@@ -77,3 +77,18 @@ def insert_lead(c, **fields):
 
 if __name__ == "__main__":
     ping()
+
+
+def start_run(c, job: str, city: str | None = None) -> int:
+    """Open a run row. finished_at stays null until finish_run, so a killed job
+    is visibly different from a job that never started."""
+    cur = c.execute(
+        "insert into runs (job, city) values (%s,%s) returning id", (job, city))
+    return cur.fetchone()[0]
+
+
+def finish_run(c, run_id, signals_new=None, leads_new=None, stats=None, error=None):
+    c.execute(
+        """update runs set finished_at=now(), signals_new=%s, leads_new=%s,
+                           stats=%s, error=%s where id=%s""",
+        (signals_new, leads_new, json.dumps(stats or {}), error, run_id))

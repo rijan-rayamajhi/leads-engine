@@ -27,7 +27,7 @@ def bucket_for(score, th):
 
 def deliver(cfg):
     """Create leads from qualified judged signals (score >= qualified threshold)."""
-    th = cfg["thresholds"]
+    th, city = cfg["thresholds"], cfg["city"]
     with db.conn() as c:
         rows = c.execute("""
             select rs.who, rs.body, rs.source, rs.source_url, rs.service,
@@ -43,7 +43,7 @@ def deliver(cfg):
             db.insert_lead(
                 c, company_id=company_id, name=who, phone=phone, email=email,
                 service=service, what_they_want=summary, evidence_quote=body,
-                why_contact=why, source=source, source_url=url,
+                why_contact=why, source=source, source_url=url, city=city,
                 intent_score=score, bucket=bucket_for(score, th))
             created += 1
     print(f"DELIVER: {created} new qualified leads")
@@ -56,15 +56,28 @@ def run(city=None, skip=()):
     if city:
         os.environ["CRAWL_CITY"] = city
 
-    if "discover" not in skip:
-        print("== DISCOVER =="); places.run()
-    if "judge" not in skip:
-        print("== JUDGE =="); judge.run()
-    if "enrich" not in skip:
-        print("== ENRICH =="); enrich.run()
-    if "verify" not in skip:
-        print("== VERIFY =="); verify.run()
-    print("== DELIVER =="); deliver(cfg)
+    # One runs row per invocation, so the dashboard can tell "cron never fired"
+    # from "cron fired and crashed". Errors are recorded, then re-raised so the
+    # GitHub Action still goes red.
+    with db.conn() as c:
+        run_id = db.start_run(c, "pipeline", os.environ.get("CRAWL_CITY") or cfg["city"])
+    stats, err = {}, None
+    try:
+        if "discover" not in skip:
+            print("== DISCOVER =="); stats["signals"] = places.run()
+        if "judge" not in skip:
+            print("== JUDGE =="); stats["judged"] = judge.run()
+        if "enrich" not in skip:
+            print("== ENRICH =="); stats["enriched"] = enrich.run()
+        if "verify" not in skip:
+            print("== VERIFY =="); stats["verified"] = verify.run()
+        print("== DELIVER =="); stats["leads"] = deliver(cfg)
+    except Exception as e:
+        err = f"{type(e).__name__}: {e}"
+        raise
+    finally:
+        with db.conn() as c:
+            db.finish_run(c, run_id, stats.get("signals"), stats.get("leads"), stats, err)
 
 
 if __name__ == "__main__":
