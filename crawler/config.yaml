@@ -1,0 +1,47 @@
+# Lead Engine crawler config. Override city at runtime: pipeline.py --once --city "Pokhara, Nepal"
+
+city: "Kathmandu, Nepal"        # default; pick any location at run time with --city
+
+# Google Places categories to scan (union of local + health + retail + food/hospitality)
+categories:
+  - restaurant
+  - cafe
+  - hotel
+  - travel agency
+  - retail store
+  - boutique
+  - clinic
+  - dentist
+  - salon
+  - gym
+
+# Services you sell -> the tags the Judge maps leads to
+services:
+  - website
+  - chatbot
+  - whatsapp_bot
+  - ai_phone
+  - mobile_app
+  - custom_software
+
+thresholds:            # intent_score buckets
+  hot: 90
+  warm: 70
+  qualified: 50
+
+source_weights:        # tuned by the feedback loop over time
+  google_reviews: 1.0
+  reddit: 0.9
+
+freshness_ttl_days: 30
+
+# Reddit subreddits to scan for intent posts
+subreddits:
+  - smallbusiness
+  - startups
+  - Entrepreneur
+  - forhire
+  - freelance
+
+# Secrets come from environment, never this file:
+#   DATABASE_URL GOOGLE_PLACES_KEY ANTHROPIC_API_KEY REDDIT_CLIENT_ID REDDIT_CLIENT_SECRET

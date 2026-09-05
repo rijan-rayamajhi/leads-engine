@@ -1,0 +1,40 @@
+name: crawl
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # every 6 hours
+  workflow_dispatch:
+    inputs:
+      city:
+        description: "Override city (e.g. 'Pokhara, Nepal')"
+        required: false
+        default: ""
+
+concurrency:               # never run two crawls at once
+  group: crawl
+  cancel-in-progress: false
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: crawler
+    env:
+      DATABASE_URL:          ${{ secrets.DATABASE_URL }}
+      GOOGLE_PLACES_KEY:     ${{ secrets.GOOGLE_PLACES_KEY }}
+      OPENROUTER_API_KEY:    ${{ secrets.OPENROUTER_API_KEY }}
+      GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}
+      REDDIT_CLIENT_ID:      ${{ secrets.REDDIT_CLIENT_ID }}
+      REDDIT_CLIENT_SECRET:  ${{ secrets.REDDIT_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Pipeline (reviews -> leads)
+        run: python pipeline.py --once ${{ inputs.city && format('--city "{0}"', inputs.city) || '' }}
+      - name: Gap leads (no-website businesses)
+        run: python gap.py
