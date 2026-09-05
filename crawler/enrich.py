@@ -42,8 +42,7 @@ def run():
     load_config()
     with db.conn() as c:
         # qualified = the judge tagged a real service (not 'none'), not yet enriched
-        # Only google_reviews carry Places business data (phone/website). Reddit
-        # leads have no company -> their contact is the thread permalink.
+        # Only google_reviews carry Places business data (phone/website).
         rows = c.execute("""
             select id, who, raw from raw_signals
             where service is not null and service <> 'none' and company_id is null

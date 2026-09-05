@@ -62,9 +62,9 @@ def passes_rules(text: str) -> bool:
     return any(p in t for p in RULE_PHRASES)
 
 
-# Per-source half-life: fresh intent (reddit/jobs) decays fast; a review problem
-# from months ago is still a valid lead, so reviews decay slowly.
-HALF_LIFE = {"google_reviews": 120.0, "reddit": 7.0, "job_board": 5.0}
+# Per-source half-life: a review problem from months ago is still a valid lead,
+# so reviews decay slowly.
+HALF_LIFE = {"google_reviews": 120.0}
 
 
 def recency_decay(posted_at, source="google_reviews") -> float:
@@ -117,8 +117,7 @@ def run(limit=None):
     with db.conn() as c:
         q = "select id, source, who, body, posted_at from raw_signals where judged_at is null"
         rows = c.execute(q + (f" limit {int(limit)}" if limit else "")).fetchall()
-        # Rule filter only applies to reviews (complaint language). Other sources
-        # (reddit, jobs) are pre-filtered by their search -> straight to LLM.
+        # Rule filter applies to reviews (complaint language).
         drop_ids = [sid for sid, src, _, body, _ in rows
                     if src == "google_reviews" and not passes_rules(body)]
         if drop_ids:

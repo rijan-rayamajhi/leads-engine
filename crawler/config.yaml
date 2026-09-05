@@ -31,17 +31,8 @@ thresholds:            # intent_score buckets
 
 source_weights:        # tuned by the feedback loop over time
   google_reviews: 1.0
-  reddit: 0.9
 
 freshness_ttl_days: 30
 
-# Reddit subreddits to scan for intent posts
-subreddits:
-  - smallbusiness
-  - startups
-  - Entrepreneur
-  - forhire
-  - freelance
-
 # Secrets come from environment, never this file:
-#   DATABASE_URL GOOGLE_PLACES_KEY OPENROUTER_API_KEY REDDIT_CLIENT_ID REDDIT_CLIENT_SECRET
+#   DATABASE_URL GOOGLE_PLACES_KEY OPENROUTER_API_KEY
