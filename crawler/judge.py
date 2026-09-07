@@ -53,14 +53,25 @@ def passes_rules(text: str) -> bool:
     return any(p in t for p in RULE_PHRASES)
 
 
-# Per-source half-life: a review problem from months ago is still a valid lead,
-# so reviews decay slowly.
-HALF_LIFE = {"google_reviews": 120.0}
+# P7. Decay was written for fresh forum intent and then applied to Google
+# reviews, which are routinely a year old. Multiplied in, it made a perfect
+# score on a 12-month-old review land at 10 against a threshold of 50, so the
+# judge produced zero leads from 1,524 signals.
+#
+# A review that says "nobody ever answers the phone" describes a STANDING
+# operational fact, not a fading event. Sources listed here are not decayed at
+# all; a source whose signals really are perishable gets a half-life instead.
+NO_DECAY = {"google_reviews"}
+HALF_LIFE = {}          # source -> days; absent and not in NO_DECAY -> 30d
+DEFAULT_HALF_LIFE = 30.0
 
 
 def recency_decay(posted_at, source="google_reviews") -> float:
-    """1.0 for fresh, halves every source half-life. Unknown date -> 0.7."""
-    hl = HALF_LIFE.get(source, 30.0)
+    """1.0 for fresh, halves every source half-life. Unknown date -> 0.7.
+    Sources in NO_DECAY are never discounted for age."""
+    if source in NO_DECAY:
+        return 1.0
+    hl = HALF_LIFE.get(source, DEFAULT_HALF_LIFE)
     if not posted_at:
         return 0.7
     if isinstance(posted_at, str):
@@ -79,7 +90,9 @@ def final_score(llm_score, intent, source_weight, posted_at, source="google_revi
     decay = recency_decay(posted_at, source)
     base = (llm_score * INTENT_MULT.get(intent, 0.5)
             * source_weight * service_weight * decay)
-    bonus = 10 if decay > 0.9 else 0  # very fresh
+    # A freshness bonus only means something where decay is in play; for a
+    # non-decaying source every signal would score it, which is no signal.
+    bonus = 10 if (decay > 0.9 and source not in NO_DECAY) else 0
     return max(0, min(100, round(base + bonus)))
 
 
@@ -139,7 +152,13 @@ def run(limit=None):
 def _selftest():
     assert passes_rules("their website is down for a week")
     assert not passes_rules("great food and lovely staff")
-    assert recency_decay(None) == 0.7
+    # P7: reviews are not discounted for age, so a real complaint can qualify
+    assert recency_decay(None, "google_reviews") == 1.0
+    assert recency_decay(datetime(2020, 1, 1, tzinfo=timezone.utc), "google_reviews") == 1.0
+    assert final_score(80, "has_problem", 1.0, datetime(2020, 1, 1, tzinfo=timezone.utc)) >= 50
+    # a perishable source still decays
+    assert recency_decay(None, "forum") == 0.7
+    assert recency_decay(datetime(2020, 1, 1, tzinfo=timezone.utc), "forum") < 0.01
     assert final_score(100, "actively_seeking", 1.0, None) <= 100
     assert final_score(0, "vague", 1.0, None) == 0
     hi = final_score(90, "actively_seeking", 1.0, datetime.now(timezone.utc))

@@ -8,26 +8,17 @@ import sys, os, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from common import load_env, load_config  # noqa: E402
-import db  # noqa: E402
+import db, scoring  # noqa: E402
 from sources import places  # noqa: E402
 import judge, enrich, verify, pitch  # noqa: E402
-
-
-def bucket_for(score, th):
-    if score is None:
-        score = 0
-    if score >= th["hot"]:
-        return "HOT"
-    if score >= th["warm"]:
-        return "WARM"
-    if score >= th["qualified"]:
-        return "QUALIFIED"
-    return "DROP"
+from website_leads import city_for  # noqa: E402
 
 
 def deliver(cfg):
     """Create leads from qualified judged signals (score >= qualified threshold)."""
-    th, city = cfg["thresholds"], cfg["city"]
+    # P4: city_for, not cfg["city"]. A --city run must file its leads under the
+    # market it actually scanned; this was fixed in website_leads.py and missed here.
+    th, city = cfg["thresholds"], city_for(cfg)
     with db.conn() as c:
         rows = c.execute("""
             select rs.who, rs.body, rs.source, rs.source_url, rs.service,
@@ -44,7 +35,7 @@ def deliver(cfg):
                 c, company_id=company_id, name=who, phone=phone, email=email,
                 service=service, what_they_want=summary, evidence_quote=body,
                 why_contact=why, source=source, source_url=url, city=city,
-                intent_score=score, bucket=bucket_for(score, th))
+                intent_score=score, bucket=scoring.bucket_for(score, th))
             created += 1
     print(f"DELIVER: {created} new qualified leads")
     return created
@@ -60,7 +51,7 @@ def run(city=None, skip=()):
     # from "cron fired and crashed". Errors are recorded, then re-raised so the
     # GitHub Action still goes red.
     with db.conn() as c:
-        run_id = db.start_run(c, "pipeline", os.environ.get("CRAWL_CITY") or cfg["city"])
+        run_id = db.start_run(c, "pipeline", city_for(cfg))
     stats, err = {}, None
     try:
         if "discover" not in skip:
@@ -70,8 +61,16 @@ def run(city=None, skip=()):
         if "enrich" not in skip:
             print("== ENRICH =="); stats["enriched"] = enrich.run()
         if "verify" not in skip:
-            print("== VERIFY =="); stats["verified"] = verify.run()
+            print("== VERIFY =="); stats["phones_checked"] = verify.run()
         print("== DELIVER =="); stats["leads"] = deliver(cfg)
+        # P5: find an email for the companies behind existing leads, so the
+        # phone is not the only way to reach them.
+        if "email" not in skip:
+            print("== EMAIL ==")
+            try:
+                stats["emails"] = enrich.run_leads()
+            except Exception as e:
+                print(f"  email stage failed, leads stay phone-only: {e}", file=sys.stderr)
         # Last on purpose: pitches are polish on leads that already exist, so a
         # model outage costs nice copy, never a lead.
         if "pitch" not in skip:

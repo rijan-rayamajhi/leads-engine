@@ -13,10 +13,12 @@ export async function login(_prev: string | null, formData: FormData) {
     String(formData.get("email") ?? ""),
     String(formData.get("password") ?? ""),
   );
-  if (!r.ok)
-    return r.reason === "disabled"
-      ? "That account has been disabled. Ask an admin."
-      : "Wrong email or password.";
+  if (!r.ok) {
+    if (r.reason === "disabled") return "That account has been disabled. Ask an admin.";
+    if (r.reason === "throttled")
+      return "Too many failed attempts. Wait 15 minutes and try again.";
+    return "Wrong email or password.";
+  }
   redirect(r.mustChange ? "/password" : "/");
 }
 
@@ -110,13 +112,12 @@ export async function saveSettings(_prev: unknown, formData: FormData) {
 
   // bucket is a view of intent_score under the current thresholds, not a
   // historical fact, so existing leads move when the thresholds move.
+  // bucket_for() is the shared SQL rule; crawler/scoring.py holds the Python
+  // twin and a parity test that runs both, so the two cannot drift apart.
   const moved = (await sql`
     with next as (
-      select id, case
-        when coalesce(intent_score, 0) >= ${thresholds.hot}       then 'HOT'
-        when coalesce(intent_score, 0) >= ${thresholds.warm}      then 'WARM'
-        when coalesce(intent_score, 0) >= ${thresholds.qualified} then 'QUALIFIED'
-        else 'DROP' end as bucket
+      select id, bucket_for(intent_score, ${thresholds.hot}, ${thresholds.warm},
+                            ${thresholds.qualified}) as bucket
       from leads
     )
     update leads l set bucket = n.bucket

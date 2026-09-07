@@ -15,7 +15,14 @@ Deliberately NOT checked:
     (Hard Rock Cafe), and a wrong claim on a call costs more than a missed lead
 """
 import re, sys, concurrent.futures as cf
+from typing import NamedTuple
 import requests
+
+
+class Issue(NamedTuple):
+    """How bad the defect is, and the line a rep can say about it."""
+    base: int
+    pitch: str
 
 # A real browser UA, because the question this module asks is literally "what
 # does a customer's browser see?". A custom agent string gets blocked by common
@@ -29,15 +36,15 @@ TIMEOUT = 15
 RETRIES = 1   # one retry: 12-way concurrency makes transient failures look fatal
 SOCIAL = ("facebook.com", "instagram.com", "linktr.ee", "linktree")
 
-# key -> (base score, pitch). Ordered strongest first; the worst issue wins.
+# key -> Issue. Ordered strongest first; the worst issue wins.
 ISSUES = {
-    "dead":      (72, "Their website does not load at all, so every search that finds them is a dead end."),
-    "parked":    (70, "Their domain is parked or for sale, so customers searching for them land on an ad page."),
-    "server":    (68, "Their website returns a server error, so customers cannot reach them online."),
-    "notfound":  (66, "The website link on their Google listing opens a missing page, so customers hit a 404."),
-    "ssl":       (64, "Their site has a broken security certificate, so browsers warn customers away before they see it."),
-    "http":      (56, "Their site still serves over plain HTTP, so Chrome shows customers a Not Secure warning."),
-    "empty":     (52, "Their homepage is essentially blank, so there is nothing to convince a customer who arrives."),
+    "dead":     Issue(72, "Their website does not load at all, so every search that finds them is a dead end."),
+    "parked":   Issue(70, "Their domain is parked or for sale, so customers searching for them land on an ad page."),
+    "server":   Issue(68, "Their website returns a server error, so customers cannot reach them online."),
+    "notfound": Issue(66, "The website link on their Google listing opens a missing page, so customers hit a 404."),
+    "ssl":      Issue(64, "Their site has a broken security certificate, so browsers warn customers away before they see it."),
+    "http":     Issue(56, "Their site still serves over plain HTTP, so Chrome shows customers a Not Secure warning."),
+    "empty":    Issue(52, "Their homepage is essentially blank, so there is nothing to convince a customer who arrives."),
 }
 ORDER = list(ISSUES)
 
@@ -128,9 +135,9 @@ def _selfcheck():
     assert worst(["empty", "dead"]) == "dead"
     assert worst([]) is None
     assert all(k in ISSUES for k in ORDER) and len(ORDER) == len(ISSUES)
-    assert all(0 < ISSUES[k][0] <= 100 and ISSUES[k][1].endswith(".") for k in ISSUES)
+    assert all(0 < ISSUES[k].base <= 100 and ISSUES[k].pitch.endswith(".") for k in ISSUES)
     # severity must strictly descend, or `worst` and the score disagree
-    scores = [ISSUES[k][0] for k in ORDER]
+    scores = [ISSUES[k].base for k in ORDER]
     assert scores == sorted(scores, reverse=True), scores
     assert is_social("https://facebook.com/x") and not is_social("https://acme.com")
     print("sitecheck selfcheck ok")
@@ -142,4 +149,4 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1:
         for u in sys.argv[1:]:
             iss = check(u)
-            print(f"{u}: {iss or 'healthy'}" + (f"  -> {ISSUES[worst(iss)][1]}" if iss else ""))
+            print(f"{u}: {iss or 'healthy'}" + (f"  -> {ISSUES[worst(iss)].pitch}" if iss else ""))

@@ -46,18 +46,50 @@ async function setSessionCookie(email: string) {
   });
 }
 
+/** P9: brute-force throttle. scrypt makes a guess slow, not impossible, and
+ *  there was no attempt limit at all. Counted in Postgres rather than memory
+ *  because serverless instances do not share state. */
+const MAX_ATTEMPTS = 8;
+const WINDOW_MINUTES = 15;
+
+async function tooManyAttempts(email: string) {
+  const [row] = (await sql`
+    select count(*)::int as n from login_attempts
+    where email = ${email} and at > now() - make_interval(mins => ${WINDOW_MINUTES})
+  `) as { n: number }[];
+  return row.n >= MAX_ATTEMPTS;
+}
+
+async function recordFailure(email: string) {
+  await sql`insert into login_attempts (email) values (${email})`;
+  // keep the table from growing forever; nothing older than the window matters
+  await sql`delete from login_attempts where at < now() - make_interval(mins => ${WINDOW_MINUTES})`;
+}
+
+async function clearAttempts(email: string) {
+  await sql`delete from login_attempts where email = ${email}`;
+}
+
 export type SignInResult =
   | { ok: true; mustChange: boolean }
-  | { ok: false; reason: "bad" | "disabled" };
+  | { ok: false; reason: "bad" | "disabled" | "throttled" };
 
 export async function signIn(email: string, password: string): Promise<SignInResult> {
   const e = email.trim().toLowerCase();
   if (!e || !password) return { ok: false, reason: "bad" };
 
+  // Checked before the hash comparison, so a throttled attacker cannot even
+  // spend our CPU, and before the user lookup so it covers unknown emails too.
+  if (await tooManyAttempts(e)) return { ok: false, reason: "throttled" };
+
   const user = await findUserWithHash(e);
   if (user) {
     if (user.disabled_at) return { ok: false, reason: "disabled" };
-    if (!(await verifyPassword(password, user.password_hash))) return { ok: false, reason: "bad" };
+    if (!(await verifyPassword(password, user.password_hash))) {
+      await recordFailure(e);
+      return { ok: false, reason: "bad" };
+    }
+    await clearAttempts(e);
     await setSessionCookie(e);
     return { ok: true, mustChange: user.must_change };
   }
@@ -69,11 +101,13 @@ export async function signIn(email: string, password: string): Promise<SignInRes
       await sql`
         insert into users (email, password_hash, role, must_change, created_by)
         values (${e}, ${await hashPassword(password)}, 'admin', true, 'bootstrap:env')`;
+      await clearAttempts(e);
       await setSessionCookie(e);
       return { ok: true, mustChange: true };
     }
   }
 
+  await recordFailure(e);
   return { ok: false, reason: "bad" };
 }
 

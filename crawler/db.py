@@ -17,19 +17,6 @@ def ping() -> bool:
     return True
 
 
-def upsert_signal(c, sig: dict) -> bool:
-    """Insert a raw signal; skip if source_url already seen. Returns True if new."""
-    cur = c.execute(
-        """insert into raw_signals (source, who, body, source_url, location, posted_at, raw)
-           values (%s,%s,%s,%s,%s,%s,%s)
-           on conflict (source_url) do nothing
-           returning id""",
-        (sig["source"], sig.get("who"), sig.get("text"), sig["source_url"],
-         sig.get("location"), sig.get("posted_at"), json.dumps(sig.get("raw") or {})),
-    )
-    return cur.fetchone() is not None
-
-
 def upsert_signals(c, sigs: list[dict], chunk=100) -> int:
     """Batch-insert signals (multi-row, on-conflict skip). Returns new-row count."""
     new = 0

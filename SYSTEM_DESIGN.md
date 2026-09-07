@@ -17,7 +17,8 @@ Cost target: **~$0/month** (Places inside its free credit, judge on a free tier)
 ┌─ CRAWLER (Python) ─────────────────────┐
 │  pipeline.py: DISCOVER → JUDGE →        │
 │               ENRICH → VERIFY → DELIVER │
-│  gap.py:      DISCOVER → GAP → DELIVER  │  (no LLM, the gap is a fact)
+│  website_leads.py: DISCOVER→DIAGNOSE→   │  (no LLM, the defect is a fact)
+│                    SCORE → DELIVER      │
 │  Runs on GitHub Actions cron, every 6h  │  (NOT on Vercel — long job, timeouts)
 └──────────────┬──────────────────────────┘
                │ upsert leads
@@ -71,7 +72,8 @@ accepted once, seeded as an admin with `must_change`, and ignored forever after.
 lead-engine/
 ├─ crawler/                     # Python pipeline
 │  ├─ pipeline.py               # orchestrator: --once / --city / --skip
-│  ├─ gap.py                    # second factory: no-website leads, no LLM
+│  ├─ website_leads.py          # main factory: broken/missing sites, no LLM
+│  ├─ scoring.py                # the one score + the one bucket rule
 │  ├─ config.yaml               # city, categories, services, thresholds, phone_region
 │  ├─ common.py                 # .env loader, config overlays, norm_name
 │  ├─ db.py                     # Postgres connection + upserts + run rows
@@ -127,6 +129,10 @@ Signal = {
 |-----------------|--------------------|-------|
 | google_reviews  | Places Text Search + reviews | name+phone+rating+reviews in one shot |
 
+Search is paged (`pageToken`, up to `MAX_PAGES`). A single unpaged call returns
+about 20 businesses, which capped every category — and so the whole pipeline —
+regardless of how large the city was.
+
 Reddit was removed: PRAW needs per-user credentials, the subreddits it searched
 are mostly US-based, and none of its posts named a local business we could call.
 Business phone/website/rating ride along in `raw_signals.raw`, so ENRICH and
@@ -170,11 +176,12 @@ not fatal.
 Results are written back onto the `raw_signals` row (there is no separate
 `judged` table).
 
-> **Known issue.** Decay is multiplicative with a 120-day half-life, which is
-> tuned for fresh forum intent, not for Google reviews that are routinely a year
-> old. A perfect 100 on a one-year-old review lands at 10 against a qualified
-> threshold of 50, so this path currently yields zero leads and `gap.py` produces
-> all of them. Fixing it means dropping or de-multiplying decay for reviews.
+Google reviews are listed in `NO_DECAY` and are not discounted for age at all.
+A review saying "nobody ever answers the phone" describes a standing operational
+fact, not a fading event. Decay was written for fresh forum intent and, applied
+multiplicatively to year-old reviews, put a perfect score at 10 against a
+threshold of 50 — which is why this path produced zero leads from 1,524 signals.
+A genuinely perishable source gets a half-life in `HALF_LIFE` instead.
 
 The judge holds no DB connection across the LLM loop: it reads rows, closes,
 calls the model for each survivor, then reopens to write. A network drop mid-run
@@ -204,8 +211,15 @@ the gap is a checkable fact rather than a judgement call:
 harvest addressable: before it, 251 of 306 businesses were skipped purely
 because a URL field was non-empty, and 24 of them had a real, verifiable defect.
 
-Verdicts are cached in `companies.site_issues` for `site_check_ttl_days` (14), so
-a 6-hourly cron does not refetch a few hundred homepages for no new information.
+Verdicts are cached in `site_checks`, keyed by URL, for `site_check_ttl_days`
+(14). Keyed by URL rather than by company because a verdict is a property of a
+URL, and because a HEALTHY business never gets a company row at all — caching on
+`companies` cached 6 of 213 and refetched the rest every six hours.
+
+**Leads are re-checked, and retired.** `recheck_open_leads` re-runs `sitecheck`
+on the sites behind untouched leads older than `lead_recheck_ttl_days` (7). If
+the defect is gone the lead gets `stale_at` and leaves the board: opening a call
+with a claim the prospect can disprove in ten seconds is worse than silence.
 
 **Precision over volume.** Two signals were tested and deliberately dropped: an
 HTTP 403 is bot-blocking rather than a defect, and a missing viewport meta
@@ -214,9 +228,12 @@ UA, because a bespoke agent string gets blocked by WAFs and then misread as a
 dead site. "Unreachable" survives a retry before it is asserted. Measured on 237
 Bangalore businesses, the surviving signals corroborated 24/24 on re-check.
 
-Score rises with how established the business is: up to +20 for review count,
-+10 for a rating at or above 4.0, then scaled by the category weight the
-feedback loop has learned. A thriving 4.5★ place with 300 reviews and a dead
+Score comes from `scoring.lead_score`: the defect's base, plus continuous,
+log-scaled terms for review count, rating and review freshness, then scaled by
+the category weight the feedback loop has learned. Every term is continuous on
+purpose — the previous version capped the review term at 200 reviews and made
+the rating a cliff at 4.0, which put 33 of 78 leads at exactly 100 and left a
+rep working 47 HOT leads in effectively random order. A thriving 4.5★ place with 300 reviews and a dead
 site is a hotter call than a quiet one. Every gap lead has a phone, or it is
 skipped, and its evidence line states the fact a rep can verify in one look.
 Businesses Places reports as closed are dropped before a request is spent.

@@ -19,22 +19,44 @@ FIELDS = ",".join(
 )
 
 
-def _search(query, key, retries=2):
+PAGE_SIZE = 20        # Places (New) maximum for searchText
+MAX_PAGES = 3         # 20/page; Places stops issuing tokens after ~60 results
+
+
+def _post(query, key, page_token=None, retries=2):
+    body = {"textQuery": query, "languageCode": "en", "pageSize": PAGE_SIZE}
+    if page_token:
+        body["pageToken"] = page_token
     for attempt in range(retries + 1):
         try:
             r = requests.post(
                 SEARCH_URL,
-                headers={"X-Goog-Api-Key": key, "X-Goog-FieldMask": FIELDS,
+                headers={"X-Goog-Api-Key": key,
+                         "X-Goog-FieldMask": FIELDS + ",nextPageToken",
                          "Content-Type": "application/json"},
-                json={"textQuery": query, "languageCode": "en"},
+                json=body,
                 timeout=30,
             )
             r.raise_for_status()
-            return r.json().get("places", [])
+            j = r.json()
+            return j.get("places", []), j.get("nextPageToken")
         except requests.RequestException:
             if attempt == retries:
                 raise
             time.sleep(2 * (attempt + 1))  # backoff
+
+
+def _search(query, key, retries=2):
+    """P6: page through the results. One unpaged call caps every category at 20
+    businesses, which capped the whole pipeline regardless of city size."""
+    out, token = [], None
+    for page in range(MAX_PAGES):
+        places, token = _post(query, key, token, retries)
+        out.extend(places)
+        if not token:
+            break
+        time.sleep(1)      # the token needs a moment to become valid
+    return out
 
 
 def fetch(city, categories, key):

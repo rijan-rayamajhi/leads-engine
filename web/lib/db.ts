@@ -27,7 +27,9 @@ export type Lead = {
 };
 
 
-/** Board rows. DROP is stored but never shown (see /leads?bucket=DROP later).
+/** Board rows. DROP is stored but never shown, and so is a lead whose defect
+ *  has since been fixed (stale_at set by website_leads.recheck_open_leads):
+ *  opening a call with a claim the prospect can disprove is worse than silence.
  *  ponytail: capped at 500 and filtered in the browser. Instant, and 83 rows
  *  today. Move filters into this WHERE when the cap starts biting. */
 export async function listLeads(market = "all") {
@@ -37,6 +39,7 @@ export async function listLeads(market = "all") {
            assigned_to, found_at, pitch, pitch_angle
     from leads
     where bucket in ('HOT','WARM','QUALIFIED')
+      and stale_at is null
       and (${market} = 'all' or city = ${market})
     order by case bucket when 'HOT' then 0 when 'WARM' then 1 else 2 end,
              intent_score desc nulls last,

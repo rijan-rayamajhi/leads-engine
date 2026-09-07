@@ -121,6 +121,42 @@ alter table leads add column if not exists pitch       text;
 alter table leads add column if not exists pitch_angle text;
 alter table leads add column if not exists pitch_at    timestamptz;
 
+-- P10: the bucket rule lived in three places (gap.py, pipeline.py, and inline
+-- SQL in web/app/actions.ts). Python now shares crawler/scoring.bucket_for and
+-- SQL shares this function; crawler/scoring.py has a parity test that runs both.
+create or replace function bucket_for(score int, hot int, warm int, qualified int)
+returns text language sql immutable as $$
+  select case
+    when coalesce(score, 0) >= hot       then 'HOT'
+    when coalesce(score, 0) >= warm      then 'WARM'
+    when coalesce(score, 0) >= qualified then 'QUALIFIED'
+    else 'DROP' end
+$$;
+
+-- P2: website health verdicts, keyed by URL rather than by company.
+-- A verdict is a property of a URL, not of a business, and a HEALTHY site never
+-- gets a company row at all, so caching it on `companies` cached almost nothing
+-- (measured: 6 of 213) and every crawl refetched every homepage.
+create table if not exists site_checks (
+  url        text primary key,
+  issues     jsonb not null,            -- '[]' = checked and healthy
+  checked_at timestamptz default now()
+);
+
+-- P3: a lead whose defect has since been fixed must leave the board, or a rep
+-- opens a call with a claim the prospect can disprove in ten seconds.
+alter table leads add column if not exists rechecked_at timestamptz;
+alter table leads add column if not exists stale_at     timestamptz;
+create index if not exists idx_leads_stale on leads (stale_at) where stale_at is null;
+
+-- P9: login throttling. Rows are pruned on write, so this stays small.
+create table if not exists login_attempts (
+  id       bigserial primary key,
+  email    text not null,
+  at       timestamptz default now()
+);
+create index if not exists idx_login_attempts on login_attempts (email, at desc);
+
 -- App users. Disabled rather than deleted: outcomes.user_email,
 -- leads.assigned_to and settings.updated_by all reference an email as text.
 create table if not exists users (

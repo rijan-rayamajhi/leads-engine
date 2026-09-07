@@ -33,6 +33,33 @@ def scrape_email(website: str):
     return None
 
 
+def run_leads():
+    """P5: 0 of 78 leads had an email. enrich.run() only covers judged signals,
+    and those are near zero, so the companies behind website leads were never
+    scraped. A broken site still usually has a mailto: on it, and an email is
+    the only follow-up channel after a missed call."""
+    load_env()
+    load_config()
+    with db.conn() as c:
+        rows = c.execute("""
+            select distinct c.id, c.website from leads l join companies c on c.id = l.company_id
+            where c.website is not null and c.email is null and l.stale_at is null
+        """).fetchall()
+    print(f"enriching {len(rows)} lead companies for an email")
+
+    found = [(cid, scrape_email(w)) for cid, w in rows]
+    found = [(cid, e) for cid, e in found if e]
+    with db.conn() as c:
+        for cid, email in found:
+            c.execute("update companies set email=%s, enriched_at=now() where id=%s",
+                      (email, cid))
+            # mirror onto the leads, which is what the dashboard reads
+            c.execute("""update leads set email=%s
+                         where company_id=%s and email is null""", (email, cid))
+    print(f"  {len(found)} emails found")
+    return len(found)
+
+
 def run():
     load_env()
     load_config()
@@ -73,4 +100,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    if "--leads" in sys.argv:
+        run_leads()
+    else:
+        run()
