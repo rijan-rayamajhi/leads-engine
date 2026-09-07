@@ -6,8 +6,8 @@ so ENRICH can reuse them without a second call.
 import os, sys, pathlib, time, requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from common import load_env, load_config  # noqa: E402
-import db  # noqa: E402
+from common import load_env, load_config
+import db
 
 SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
 FIELDS = ",".join(
@@ -50,7 +50,7 @@ def _search(query, key, retries=2):
     """P6: page through the results. One unpaged call caps every category at 20
     businesses, which capped the whole pipeline regardless of city size."""
     out, token = [], None
-    for page in range(MAX_PAGES):
+    for _ in range(MAX_PAGES):
         places, token = _post(query, key, token, retries)
         out.extend(places)
         if not token:

@@ -8,8 +8,8 @@ import phonenumbers
 from rapidfuzz import fuzz
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
-import db  # noqa: E402
+from common import load_env, load_config
+import db
 
 # Fallback region for numbers with no +country code. Market-dependent, so it
 # comes from config (phone_region), overridable via the settings table like city.

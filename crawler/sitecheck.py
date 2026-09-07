@@ -50,7 +50,7 @@ ORDER = list(ISSUES)
 
 PARKED_RE = re.compile(
     r"domain (?:is )?for sale|this domain is parked|buy this domain|"
-    r"godaddy\.com/domains|sedo\.com/search|hugedomains", re.I)
+    r"godaddy\.com/domains|sedo\.com/search|hugedomains", re.IGNORECASE)
 def worst(issues):
     """The issue a rep should lead the call with, or None."""
     return next((k for k in ORDER if k in issues), None)
@@ -89,7 +89,7 @@ def check(url):
     has to survive a retry before we assert it.
     """
     err = None
-    for attempt in range(RETRIES + 1):
+    for _ in range(RETRIES + 1):
         try:
             r = requests.get(url, timeout=TIMEOUT, headers=UA, allow_redirects=True)
             return classify(r.status_code, str(r.url), r.text[:200_000])
@@ -104,7 +104,7 @@ def check(url):
 def check_many(urls, workers=12):
     """{url: [issue keys]} for many sites at once.Network-bound, so threads."""
     with cf.ThreadPoolExecutor(workers) as ex:
-        return dict(zip(urls, ex.map(check, urls)))
+        return dict(zip(urls, ex.map(check, urls), strict=True))
 
 
 def is_social(website):

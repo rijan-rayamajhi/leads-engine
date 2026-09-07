@@ -10,8 +10,8 @@ Both writers now share common.norm_name; this brings existing rows in line.
 import sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, norm_name  # noqa: E402
-import db  # noqa: E402
+from common import load_env, norm_name
+import db
 
 
 def plan(rows):

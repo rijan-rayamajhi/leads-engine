@@ -7,11 +7,11 @@
 import sys, os, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
-import db, scoring  # noqa: E402
-from sources import places  # noqa: E402
-import judge, enrich, verify, pitch  # noqa: E402
-from website_leads import city_for  # noqa: E402
+from common import load_env, load_config
+import db, scoring
+from sources import places
+import judge, enrich, verify, pitch
+from website_leads import city_for
 
 
 def deliver(cfg):

@@ -11,12 +11,11 @@ const field = `${FIELD} h-9 px-3.5`;
 function Note({ state }: { state: { ok: boolean; message: string } | null }) {
   if (!state) return null;
   return (
-    <p
-      role="status"
+    <output
       className={`rounded-pill px-4 py-2 text-sm text-ink ${state.ok ? "bg-won" : "bg-lost"}`}
     >
       {state.message}
-    </p>
+    </output>
   );
 }
 

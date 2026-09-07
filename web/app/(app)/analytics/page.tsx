@@ -85,7 +85,7 @@ export default async function AnalyticsPage() {
   const [{ funnel, breakdown }, tuned] = await Promise.all([analytics(await currentMarket()), weights()]);
 
   const by = (d: Breakdown["dim"]) =>
-    breakdown.filter((r) => r.dim === d).sort((a, b) => b.total - a.total);
+    breakdown.filter((r) => r.dim === d).toSorted((a, b) => b.total - a.total);
 
   const count = (s: string) => funnel.find((f) => f.status === s)?.n ?? 0;
   const total = funnel.reduce((n, f) => n + f.n, 0);

@@ -18,8 +18,8 @@ enough outcomes exist (plan Phase 9 "later"); the overlay interface won't change
 import sys, json, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
-import db  # noqa: E402
+from common import load_env, load_config
+import db
 
 MIN_DECIDED = 5          # need this many won+lost before we trust a slice
 W_MIN, W_MAX = 0.5, 1.5  # clamp so one slice can't dominate or vanish

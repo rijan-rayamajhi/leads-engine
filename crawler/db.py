@@ -39,8 +39,8 @@ def upsert_signals(c, sigs: list[dict], chunk=100) -> int:
 
 def upsert_company(c, name_norm, **fields):
     """Insert or update a company by normalized name. Returns company id."""
-    cols = ["name_norm"] + list(fields)
-    vals = [name_norm] + list(fields.values())
+    cols = ["name_norm", *fields]
+    vals = [name_norm, *fields.values()]
     placeholders = ",".join(["%s"] * len(vals))
     updates = ",".join(f"{k}=excluded.{k}" for k in fields) or "name_norm=excluded.name_norm"
     cur = c.execute(

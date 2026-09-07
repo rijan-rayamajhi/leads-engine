@@ -115,12 +115,11 @@ export default function SettingsForm({ initial }: { initial: Settings }) {
           {pending ? "Saving…" : "Save for the next crawl"}
         </button>
         {state && (
-          <p
-            role="status"
+          <output
             className={`rounded-pill px-4 py-2 text-sm text-ink ${state.ok ? "bg-won" : "bg-lost"}`}
           >
             {state.message}
-          </p>
+          </output>
         )}
       </div>
     </form>

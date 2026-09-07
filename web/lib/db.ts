@@ -164,7 +164,7 @@ export async function getSettings(): Promise<Settings & { updated_by: string | n
   const get = (k: string) => rows.find((r) => r.key === k);
   const newest = rows
     .filter((r) => r.updated_by && !r.updated_by.startsWith("seed:"))
-    .sort((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))[0];
+    .toSorted((a, b) => +new Date(b.updated_at) - +new Date(a.updated_at))[0];
   return {
     city: (get("city")?.value as string) ?? DEFAULTS.city,
     categories: (get("categories")?.value as string[]) ?? DEFAULTS.categories,

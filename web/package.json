@@ -7,7 +7,10 @@
     "start": "next start",
     "test:auth": "node --env-file=.env.local lib/auth.test.mjs",
     "test": "node lib/leads.test.mjs && node lib/settings.test.mjs && node lib/password.test.mjs",
-    "test:all": "npm test && npm run test:auth"
+    "test:all": "npm test && npm run test:auth",
+    "lint": "oxlint --deny-warnings app components lib",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run lint && npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -23,6 +26,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "tailwindcss": "^4.3.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "oxlint": "^1.81.0"
   }
 }

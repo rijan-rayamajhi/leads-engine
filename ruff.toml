@@ -1,0 +1,28 @@
+# Lint config for crawler/. Chosen so the checks that matter are enforced and
+# the ones that fight this codebase's deliberate patterns are off with a reason.
+line-length = 100
+target-version = "py312"
+
+[lint]
+extend-select = [
+  "I",       # import sorting
+  "B",       # bugbear
+  "UP",      # pyupgrade
+  "RUF",
+  "FURB",
+]
+ignore = [
+  # Each crawler module is runnable on its own (`python judge.py --selftest`),
+  # which needs sys.path.insert BEFORE the local imports. isort cannot express
+  # "sort only after this statement", so ordering is left alone rather than
+  # fought with. Ruff does not flag the late imports themselves.
+  "I001",
+  # Deliberate: a single bad row (one LLM refusal, one unreachable site, one
+  # missing settings table) must never kill a whole crawl. Every one of these
+  # logs and continues, and the surrounding comment says so.
+  "BLE001",
+]
+
+[lint.per-file-ignores]
+# Selfchecks assert on internals on purpose.
+"*/migrate_name_norm.py" = ["S101"]

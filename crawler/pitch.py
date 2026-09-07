@@ -19,8 +19,8 @@ the pipeline is unharmed: AI enriches leads here, it never decides they exist.
 import re, sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
-import db, llm  # noqa: E402
+from common import load_env, load_config
+import db, llm
 import time
 
 MAX_CHARS = 400   # a pitch a rep reads at a glance, not a paragraph
@@ -128,7 +128,7 @@ def run(limit=None):
         """).fetchall()
     cols = ["id", "name", "service", "why_contact", "evidence_quote", "city",
             "category", "rating", "review_count"]
-    leads = [dict(zip(cols, r)) for r in rows]
+    leads = [dict(zip(cols, r, strict=True)) for r in rows]
     print(f"pitching {len(leads)} leads")
 
     # Slow calls with NO DB connection held, same shape as judge.run.

@@ -1,0 +1,4 @@
+# Dev-only tooling. NOT installed by the GitHub Action, which uses
+# requirements.txt so a lint dependency can never break a crawl.
+-r requirements.txt
+ruff>=0.16

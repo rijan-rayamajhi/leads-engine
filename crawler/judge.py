@@ -4,12 +4,12 @@ Pass A (free): phrase rules drop obvious non-leads before any LLM cost.
 Pass B: OpenRouter (free model) classifies survivors -> service, intent, summary, why_contact, score.
 Final intent_score = LLM score * source_weight * recency_decay (+ recency bonus).
 """
-import os, sys, time, pathlib
-from datetime import datetime, timezone
+import sys, time, pathlib
+from datetime import datetime, UTC
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
-import db, llm  # noqa: E402
+from common import load_env, load_config
+import db, llm
 
 # Pass A: a rule hit means "possible problem" -> send to LLM. No hit -> drop.
 RULE_PHRASES = [
@@ -76,10 +76,10 @@ def recency_decay(posted_at, source="google_reviews") -> float:
         return 0.7
     if isinstance(posted_at, str):
         try:
-            posted_at = datetime.fromisoformat(posted_at.replace("Z", "+00:00"))
+            posted_at = datetime.fromisoformat(posted_at)   # handles a trailing Z
         except ValueError:
             return 0.7
-    age_days = (datetime.now(timezone.utc) - posted_at).total_seconds() / 86400
+    age_days = (datetime.now(UTC) - posted_at).total_seconds() / 86400
     return 0.5 ** (max(age_days, 0) / hl)
 
 
@@ -154,18 +154,18 @@ def _selftest():
     assert not passes_rules("great food and lovely staff")
     # P7: reviews are not discounted for age, so a real complaint can qualify
     assert recency_decay(None, "google_reviews") == 1.0
-    assert recency_decay(datetime(2020, 1, 1, tzinfo=timezone.utc), "google_reviews") == 1.0
-    assert final_score(80, "has_problem", 1.0, datetime(2020, 1, 1, tzinfo=timezone.utc)) >= 50
+    assert recency_decay(datetime(2020, 1, 1, tzinfo=UTC), "google_reviews") == 1.0
+    assert final_score(80, "has_problem", 1.0, datetime(2020, 1, 1, tzinfo=UTC)) >= 50
     # a perishable source still decays
     assert recency_decay(None, "forum") == 0.7
-    assert recency_decay(datetime(2020, 1, 1, tzinfo=timezone.utc), "forum") < 0.01
+    assert recency_decay(datetime(2020, 1, 1, tzinfo=UTC), "forum") < 0.01
     assert final_score(100, "actively_seeking", 1.0, None) <= 100
     assert final_score(0, "vague", 1.0, None) == 0
-    hi = final_score(90, "actively_seeking", 1.0, datetime.now(timezone.utc))
+    hi = final_score(90, "actively_seeking", 1.0, datetime.now(UTC))
     lo = final_score(90, "vague", 0.9, None)
     assert hi > lo
     # a service the feedback loop likes must outscore one it does not
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     assert (final_score(80, "has_problem", 1.0, now, service_weight=1.4)
             > final_score(80, "has_problem", 1.0, now, service_weight=0.6))
     print("selftest OK")

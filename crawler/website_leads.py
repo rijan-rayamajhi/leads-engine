@@ -16,8 +16,8 @@ lead comes from.
 import json, os, sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config, norm_name  # noqa: E402
-import db, scoring, sitecheck  # noqa: E402
+from common import load_env, load_config, norm_name
+import db, scoring, sitecheck
 
 # leads.what_they_want, keyed by the evidence fragment before any colon
 WHAT_THEY_WANT = {

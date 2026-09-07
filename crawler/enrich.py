@@ -4,11 +4,11 @@ Phone/website/rating already rode along from Places in raw_signals.raw, so the
 only network work here is a best-effort website scrape for an email. Results are
 cached in `companies` (keyed by normalized name) and linked back to the signal.
 """
-import os, sys, re, pathlib, requests
+import sys, re, pathlib, requests
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config, norm_name  # noqa: E402
-import db  # noqa: E402
+from common import load_env, load_config, norm_name
+import db
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 UA = {"User-Agent": "Mozilla/5.0 (lead-engine)"}

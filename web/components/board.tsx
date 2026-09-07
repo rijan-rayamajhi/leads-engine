@@ -22,11 +22,20 @@ export default function Board({ leads, me }: { leads: Lead[]; me: string }) {
     state.map((l) => (l.id === p.id ? { ...l, ...p } : l)),
   );
   const [, start] = useTransition();
-  const [bucket, setBucket] = useState("all");
-  const [status, setStatusF] = useState("all");
-  const [service, setService] = useState("all");
-  const [q, setQ] = useState("");
+  const [bucket, setBucketState] = useState("all");
+  const [status, setStatusState] = useState("all");
+  const [service, setServiceState] = useState("all");
+  const [q, setQState] = useState("");
   const [page, setPage] = useState(1);
+
+  /* Any filter change puts you back on page 1: page 4 of an old result set is
+     never what you meant. Done in the setters rather than in an effect, so the
+     reset happens in the event that caused it instead of triggering a second
+     render pass after the first has already painted. */
+  const setBucket = (v: string) => { setBucketState(v); setPage(1); };
+  const setStatusF = (v: string) => { setStatusState(v); setPage(1); };
+  const setService = (v: string) => { setServiceState(v); setPage(1); };
+  const setQ = (v: string) => { setQState(v); setPage(1); };
 
   const services = [...new Set(rows.map((l) => l.service).filter(Boolean))] as string[];
   const filters = { bucket, status, service, q };
@@ -34,12 +43,6 @@ export default function Board({ leads, me }: { leads: Lead[]; me: string }) {
   const shown = filterLeads(rows, filters);
 
   const { slice, pages, current, from, to } = paginate(shown, page);
-
-  // any filter change puts you back on page 1; page 4 of an old result set is
-  // never what you meant
-  useEffect(() => {
-    setPage(1);
-  }, [bucket, status, service, q]);
 
   function go(n: number) {
     setPage(n);
@@ -78,7 +81,9 @@ export default function Board({ leads, me }: { leads: Lead[]; me: string }) {
         e.preventDefault();
         search.current?.focus();
       } else if (e.key === "Escape" && document.activeElement === search.current) {
-        setQ("");
+        // the raw setters are referentially stable, so this effect needs no deps
+        setQState("");
+        setPage(1);
         search.current?.blur();
       }
     };
@@ -204,9 +209,9 @@ export default function Board({ leads, me }: { leads: Lead[]; me: string }) {
                   <ChevronLeft size={16} strokeWidth={2} />
                 </button>
 
-                {pageWindow(current, pages).map((n, i) =>
+                {pageWindow(current, pages).map((n, i, all) =>
                   n === null ? (
-                    <span key={`gap-${i}`} className="px-1 text-sm text-muted">
+                    <span key={`gap-before-${all[i + 1] ?? "end"}`} className="px-1 text-sm text-muted">
                       …
                     </span>
                   ) : (
