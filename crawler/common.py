@@ -30,11 +30,18 @@ def load_config(refresh=False):
 
     cfg = yaml.safe_load((ROOT / "crawler" / "config.yaml").read_text())
 
-    # feedback loop writes crawler/weights.json; it overrides config defaults
+    # feedback loop writes crawler/weights.json; it overrides config defaults.
+    # Shape: {"source": {...}, "service": {...}, "category": {...}} -> merged as
+    # cfg["source_weights"] etc. A flat {name: number} file is the old
+    # source-only format, still honoured so an existing overlay keeps working.
     wf = ROOT / "crawler" / "weights.json"
     if wf.exists():
         import json
-        cfg.setdefault("source_weights", {}).update(json.loads(wf.read_text()))
+        tuned = json.loads(wf.read_text())
+        if tuned and all(isinstance(v, (int, float)) for v in tuned.values()):
+            tuned = {"source": tuned}
+        for dim, weights in tuned.items():
+            cfg.setdefault(f"{dim}_weights", {}).update(weights)
 
     # dashboard-editable settings win over the file; missing DB is not fatal,
     # the crawler just falls back to config.yaml.

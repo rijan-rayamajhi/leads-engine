@@ -38,5 +38,9 @@ freshness_ttl_days: 30
 # Must match the market in `city`, or valid local numbers get flagged invalid.
 phone_region: IN
 
+# How long a website health verdict stays fresh. The cron runs every 6h; without
+# this every run would re-fetch a few hundred homepages for no new information.
+site_check_ttl_days: 14
+
 # Secrets come from environment, never this file:
 #   DATABASE_URL GOOGLE_PLACES_KEY OPENROUTER_API_KEY

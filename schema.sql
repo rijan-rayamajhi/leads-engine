@@ -100,6 +100,12 @@ alter table leads     add column if not exists city text;
 alter table companies add column if not exists city text;
 create index if not exists idx_leads_city on leads (city);
 
+-- Website health verdict from crawler/sitecheck.py. Cached so a 6-hourly cron
+-- does not re-fetch every homepage; '[]' means checked and healthy, which is
+-- why the timestamp is separate from the issue list.
+alter table companies add column if not exists site_issues     jsonb;
+alter table companies add column if not exists site_checked_at timestamptz;
+
 -- rep -> user rename, idempotent so schema.sql stays safe to re-run
 do $$ begin
   if exists (select 1 from information_schema.columns

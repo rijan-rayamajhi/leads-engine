@@ -81,9 +81,13 @@ def recency_decay(posted_at, source="google_reviews") -> float:
     return 0.5 ** (max(age_days, 0) / hl)
 
 
-def final_score(llm_score, intent, source_weight, posted_at, source="google_reviews") -> int:
+def final_score(llm_score, intent, source_weight, posted_at, source="google_reviews",
+                service_weight=1.0) -> int:
+    """service_weight comes from the feedback loop: a service that keeps closing
+    scores its future leads higher, one that never closes scores them lower."""
     decay = recency_decay(posted_at, source)
-    base = llm_score * INTENT_MULT.get(intent, 0.5) * source_weight * decay
+    base = (llm_score * INTENT_MULT.get(intent, 0.5)
+            * source_weight * service_weight * decay)
     bonus = 10 if decay > 0.9 else 0  # very fresh
     return max(0, min(100, round(base + bonus)))
 
@@ -112,6 +116,7 @@ def run(limit=None):
     cfg = load_config()
     key = os.environ["OPENROUTER_API_KEY"]
     weights = cfg["source_weights"]
+    svc_weights = cfg.get("service_weights", {})
 
     # 1. Read rows + batch-drop rule failures (short DB session).
     with db.conn() as c:
@@ -138,7 +143,8 @@ def run(limit=None):
             print(f"  classify failed id={sid}: {e}", file=sys.stderr)
             continue
         score = final_score(int(r.get("score", 0)), r.get("intent", "vague"),
-                            weights.get(source, 1.0), posted_at, source)
+                            weights.get(source, 1.0), posted_at, source,
+                            svc_weights.get(r.get("service"), 1.0))
         updates.append((r.get("service"), r.get("intent"), score,
                         r.get("summary"), r.get("why_contact"), sid))
 
@@ -161,6 +167,10 @@ def _selftest():
     hi = final_score(90, "actively_seeking", 1.0, datetime.now(timezone.utc))
     lo = final_score(90, "vague", 0.9, None)
     assert hi > lo
+    # a service the feedback loop likes must outscore one it does not
+    now = datetime.now(timezone.utc)
+    assert (final_score(80, "has_problem", 1.0, now, service_weight=1.4)
+            > final_score(80, "has_problem", 1.0, now, service_weight=0.6))
     print("selftest OK")
 
 

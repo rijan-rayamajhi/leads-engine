@@ -185,15 +185,38 @@ costs the batch, never a stuck transaction.
 It rereads the harvested businesses in `raw_signals.raw` and files a lead wherever
 the gap is a checkable fact rather than a judgement call:
 
-| Finding | Service | Base score |
-|---------|---------|-----------|
-| no website at all | website | 70 |
-| social page only (facebook / instagram / linktree) | website | 60 |
+| Finding | Base | How it is verified |
+|---------|------|--------------------|
+| site does not load (survives a retry) | 72 | connection error |
+| domain parked or for sale | 70 | marker text on the page |
+| server error | 68 | HTTP 5xx |
+| listing link 404s | 66 | HTTP 404 on the URL Google publishes |
+| broken TLS certificate | 64 | SSL error |
+| no website at all | 70 | Places has no `websiteUri` |
+| serves plain HTTP | 56 | final URL is not https |
+| homepage essentially blank | 52 | body under 1500 bytes |
+| social page only | 60 | facebook / instagram / linktree |
+
+**A healthy site means no lead.** That check is what makes the other 80% of the
+harvest addressable: before it, 251 of 306 businesses were skipped purely
+because a URL field was non-empty, and 24 of them had a real, verifiable defect.
+
+Verdicts are cached in `companies.site_issues` for `site_check_ttl_days` (14), so
+a 6-hourly cron does not refetch a few hundred homepages for no new information.
+
+**Precision over volume.** Two signals were tested and deliberately dropped: an
+HTTP 403 is bot-blocking rather than a defect, and a missing viewport meta
+misfired on the one JS-rendered site it flagged. `sitecheck` sends a real browser
+UA, because a bespoke agent string gets blocked by WAFs and then misread as a
+dead site. "Unreachable" survives a retry before it is asserted. Measured on 237
+Bangalore businesses, the surviving signals corroborated 24/24 on re-check.
 
 Score rises with how established the business is: up to +20 for review count,
-+10 for a rating at or above 4.0. A thriving 4.5★ place with 300 reviews and no
++10 for a rating at or above 4.0, then scaled by the category weight the
+feedback loop has learned. A thriving 4.5★ place with 300 reviews and a dead
 site is a hotter call than a quiet one. Every gap lead has a phone, or it is
 skipped, and its evidence line states the fact a rep can verify in one look.
+Businesses Places reports as closed are dropped before a request is spent.
 
 ---
 
@@ -262,10 +285,21 @@ Next.js reads `leads` from Postgres. Features for the sales team:
 
 Every status change → `outcomes(lead_id, user_email, status, notes, updated_at)`.
 
-Nightly GitHub Action:
-- win-rate per **source**, **service**, **score band**.
-- rewrite `config.yaml` source_weights + thresholds toward what converts.
-- (later) train logistic model on features → score once ≥ ~50 outcomes.
+Nightly GitHub Action computes win rate per **source, service and category**, and
+writes `weights.json`, an overlay merged over `config.yaml`. A slice with fewer
+than 5 decided leads keeps the neutral 1.0, so a small sample cannot move the
+dial. Weights clamp to 0.5–1.5 so no slice can dominate or vanish.
+
+Grouping by three dimensions rather than source alone is what makes the loop
+able to learn at all: with one live source, a source-only weight is structurally
+incapable of saying anything. "Clinics convert at 40%, gyms at 5%" is actionable.
+
+`judge.py` applies source × service; `gap.py` applies category. (Later) train a
+model on features once ≥ ~50 outcomes exist; the overlay interface won't change.
+
+> **Precondition.** `outcomes` is empty: nobody has called a lead yet, so the
+> loop has no ground truth and every weight is neutral. Roughly 20 decided leads
+> is the point where it starts to say anything.
 
 ---
 
@@ -401,6 +435,14 @@ retargeted run tags its leads with the market it actually scanned.
 Not built: retention purge of DROP leads older than 30d; a trained scoring model
 to replace the linear win-rate heuristic; outreach/send.
 
+**On the AI.** The judge is the only place a model is called, and it has produced
+zero leads: the Pass A keyword list rejects 98% of signals before a model sees
+one (1,496 of 1,524), and of the 28 that reached it, none cleared the threshold.
+Every lead this system has ever produced came from a deterministic rule. The
+honest read is that AI is not currently load-bearing here; the near-term use is
+writing the pitch from evidence already verified, not deciding whether a lead
+exists.
+
 ---
 
 ## 17. What changed from v2
@@ -414,6 +456,8 @@ to replace the linear win-rate heuristic; outreach/send.
 | `judged` table | columns on `raw_signals` | one row per signal, no join |
 | one lead factory | two (`pipeline.py`, `gap.py`) | verifiable gaps beat LLM judgement on aged reviews |
 | single city | markets, DB-backed settings | retarget without a commit; leads keep the city they were found in |
+| gap = missing `websiteUri` | website health check (`sitecheck.py`) | 82% of the harvest was skipped for having a non-empty URL field |
+| weights per source | per source, service and category | one live source cannot teach a source-only weight anything |
 
 Added since: `runs` (crawl observability), `settings` (editable config), `users`
 (accounts + roles), `city` (market scoping), `feedback.py` (weight retuning).

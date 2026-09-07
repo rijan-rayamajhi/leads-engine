@@ -14,7 +14,7 @@ FIELDS = ",".join(
     "places." + f for f in [
         "id", "displayName", "nationalPhoneNumber", "internationalPhoneNumber",
         "websiteUri", "rating", "userRatingCount", "primaryTypeDisplayName",
-        "formattedAddress", "reviews", "googleMapsUri",
+        "formattedAddress", "reviews", "googleMapsUri", "businessStatus",
     ]
 )
 
@@ -39,7 +39,7 @@ def _search(query, key, retries=2):
 
 def fetch(city, categories, key):
     """Return list of Signal dicts (one per review)."""
-    signals = []
+    signals, closed = [], 0
     for cat in categories:
         try:
             places = _search(f"{cat} in {city}", key)
@@ -47,6 +47,11 @@ def fetch(city, categories, key):
             print(f"  places search failed for {cat!r}: {e}", file=sys.stderr)
             continue
         for p in places:
+            # A closed listing still carries reviews and a phone, so without this
+            # a rep ends up cold-calling a restaurant that shut last year.
+            if p.get("businessStatus") not in (None, "OPERATIONAL"):
+                closed += 1
+                continue
             name = p.get("displayName", {}).get("text", "")
             phone = p.get("internationalPhoneNumber") or p.get("nationalPhoneNumber")
             biz = {
@@ -55,6 +60,7 @@ def fetch(city, categories, key):
                 "review_count": p.get("userRatingCount"),
                 "category": p.get("primaryTypeDisplayName", {}).get("text"),
                 "maps_uri": p.get("googleMapsUri"),
+                "business_status": p.get("businessStatus"),
             }
             for i, rv in enumerate(p.get("reviews", [])):
                 text = (rv.get("text") or {}).get("text", "").strip()
@@ -70,6 +76,8 @@ def fetch(city, categories, key):
                     "posted_at": rv.get("publishTime"),
                     "raw": {**biz, "review_rating": rv.get("rating")},
                 })
+    if closed:
+        print(f"  skipped {closed} closed/temporarily-closed businesses")
     return signals
 
 
