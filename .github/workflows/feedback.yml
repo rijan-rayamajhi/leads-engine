@@ -25,6 +25,8 @@ jobs:
       - name: Retune source weights from outcomes
         run: python feedback.py
       - name: Commit updated weights (if changed)
+        # weights.json is absent until a source has enough decided leads
+        if: hashFiles('crawler/weights.json') != ''
         run: |
           git config user.name  "lead-engine-bot"
           git config user.email "bot@users.noreply.github.com"
