@@ -114,6 +114,13 @@ do $$ begin
   end if;
 end $$;
 
+-- AI-written call opener, from crawler/pitch.py. Nullable on purpose: a lead
+-- without one is still fully usable via its rule-written why_contact, so the
+-- pitch stage can fail or be skipped without degrading the pipeline.
+alter table leads add column if not exists pitch       text;
+alter table leads add column if not exists pitch_angle text;
+alter table leads add column if not exists pitch_at    timestamptz;
+
 -- App users. Disabled rather than deleted: outcomes.user_email,
 -- leads.assigned_to and settings.updated_by all reference an email as text.
 create table if not exists users (

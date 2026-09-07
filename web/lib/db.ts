@@ -20,6 +20,10 @@ export type Lead = {
   status: string;
   assigned_to: string | null;
   found_at: string;
+  /** AI-written call opener. Null when the pitch stage has not run for this
+   *  lead; why_contact is the rule-written fallback and is never null. */
+  pitch: string | null;
+  pitch_angle: string | null;
 };
 
 
@@ -30,7 +34,7 @@ export async function listLeads(market = "all") {
   return (await sql`
     select id, name, phone, email, service, what_they_want, evidence_quote,
            why_contact, source, source_url, intent_score, bucket, status,
-           assigned_to, found_at
+           assigned_to, found_at, pitch, pitch_angle
     from leads
     where bucket in ('HOT','WARM','QUALIFIED')
       and (${market} = 'all' or city = ${market})
@@ -55,6 +59,7 @@ export async function getLead(id: string) {
     select l.id, l.name, l.phone, l.email, l.service, l.what_they_want,
            l.evidence_quote, l.why_contact, l.source, l.source_url, l.intent_score,
            l.bucket, l.status, l.assigned_to, l.found_at, l.city,
+           l.pitch, l.pitch_angle,
            c.category, c.rating, c.review_count, c.website, c.phone_valid
     from leads l left join companies c on c.id = l.company_id
     where l.id = ${id}

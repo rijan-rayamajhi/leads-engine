@@ -77,6 +77,9 @@ lead-engine/
 │  ├─ db.py                     # Postgres connection + upserts + run rows
 │  ├─ sources/places.py         # Google reviews + business harvest
 │  ├─ judge.py                  # rules + OpenRouter classifier
+│  ├─ pitch.py                  # AI call opener from verified facts
+│  ├─ llm.py                    # shared OpenRouter client (judge + pitch)
+│  ├─ sitecheck.py              # website health -> verifiable defects
 │  ├─ enrich.py                 # phone (Places) + email (site scrape)
 │  ├─ verify.py                 # phonenumbers + fuzzy dedupe
 │  ├─ feedback.py               # outcomes → weights.json overlay
@@ -217,6 +220,27 @@ feedback loop has learned. A thriving 4.5★ place with 300 reviews and a dead
 site is a hotter call than a quiet one. Every gap lead has a phone, or it is
 skipped, and its evidence line states the fact a rep can verify in one look.
 Businesses Places reports as closed are dropped before a request is spent.
+
+---
+
+## 4c. PITCH — the one place a model earns its keep
+
+`pitch.py` turns a lead's verified facts into the sentence a rep says out loud.
+Before it, 40 of 71 leads carried the byte-identical line "No website, so
+customers searching online never find them", and each lead's real hook (4.5
+stars, 517 reviews, a boutique in Bangalore) sat unused in the row.
+
+**The model never states a fact.** Every number and defect is passed in, already
+verified by `sitecheck` or Places, and the prompt forbids adding others. A
+returned pitch is then scanned for numbers that are not in the lead's facts, and
+one that invents a figure is *discarded* rather than corrected: the rule-written
+`why_contact` is already accurate, so rejecting costs polish, not truth. A
+hallucinated review count is the single output that can make a rep sound like a
+liar on a live call.
+
+The stage runs last and its failure is caught, so a model outage costs nice copy
+and never a lead. This is the shape every future use of AI here should take:
+**AI enriches leads, it never decides they exist.**
 
 ---
 
@@ -435,7 +459,8 @@ retargeted run tags its leads with the market it actually scanned.
 Not built: retention purge of DROP leads older than 30d; a trained scoring model
 to replace the linear win-rate heuristic; outreach/send.
 
-**On the AI.** The judge is the only place a model is called, and it has produced
+**On the AI.** `pitch.py` is the one load-bearing use: it writes the call opener
+from facts the rules already verified. The judge, by contrast, has produced
 zero leads: the Pass A keyword list rejects 98% of signals before a model sees
 one (1,496 of 1,524), and of the 28 that reached it, none cleared the threshold.
 Every lead this system has ever produced came from a deterministic rule. The

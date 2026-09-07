@@ -63,7 +63,10 @@ export default function LeadCard({
       {lead.evidence_quote && (
         <p className="-mt-1 line-clamp-2 text-sm">{lead.evidence_quote}</p>
       )}
-      <p className="-mt-2 line-clamp-2 text-sm text-muted">{lead.why_contact}</p>
+      {/* the per-business opener when we have one, else the shared rule line */}
+      <p className="-mt-2 line-clamp-2 text-sm text-muted">
+        {lead.pitch ?? lead.why_contact}
+      </p>
 
       <footer className="mt-auto flex flex-wrap items-center gap-2 pt-1">
         <span

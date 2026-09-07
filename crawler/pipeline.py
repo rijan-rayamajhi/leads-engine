@@ -10,7 +10,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from common import load_env, load_config  # noqa: E402
 import db  # noqa: E402
 from sources import places  # noqa: E402
-import judge, enrich, verify  # noqa: E402
+import judge, enrich, verify, pitch  # noqa: E402
 
 
 def bucket_for(score, th):
@@ -72,6 +72,15 @@ def run(city=None, skip=()):
         if "verify" not in skip:
             print("== VERIFY =="); stats["verified"] = verify.run()
         print("== DELIVER =="); stats["leads"] = deliver(cfg)
+        # Last on purpose: pitches are polish on leads that already exist, so a
+        # model outage costs nice copy, never a lead.
+        if "pitch" not in skip:
+            print("== PITCH ==")
+            try:
+                stats["pitched"] = pitch.run()
+            except Exception as e:
+                print(f"  pitch stage failed, leads keep their rule copy: {e}",
+                      file=sys.stderr)
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         raise

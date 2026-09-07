@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   ArrowLeft, Phone, Mail, Globe, Briefcase, User, Star,
-  ExternalLink, Check, Clock, X, MessageSquare, FileText, MapPin, Building2,
+  ExternalLink, Check, Clock, X, MessageSquare, FileText, MapPin, Building2, Quote,
 } from "lucide-react";
 import { getActivity, getLead } from "@/lib/db";
 import type { Activity } from "@/lib/db";
@@ -327,13 +327,31 @@ export default async function LeadPage({
             </>
           ) : (
             <>
+              {/* The opener sits first and largest: it is the sentence the rep
+                  says out loud, and it is the only line written for this one
+                  business rather than shared by every lead of its type. */}
+              {lead.pitch && (
+                <div className="flex flex-col gap-2 rounded-2xl bg-cool p-5 text-ink">
+                  <p className="flex items-center gap-1.5 text-xs">
+                    <Quote size={13} strokeWidth={2} />
+                    Say this
+                  </p>
+                  <p className="text-lg leading-snug">{lead.pitch}</p>
+                  {lead.pitch_angle && (
+                    <p className="text-sm text-ink/70">{lead.pitch_angle}</p>
+                  )}
+                </div>
+              )}
+
               <div>
                 <p className="text-xs text-muted">What they want</p>
                 <p className="text-lg">{lead.what_they_want}</p>
               </div>
 
               <div>
-                <p className="text-xs text-muted">Why contact them</p>
+                <p className="text-xs text-muted">
+                  {lead.pitch ? "The verified fact behind it" : "Why contact them"}
+                </p>
                 <p>{lead.why_contact}</p>
               </div>
 

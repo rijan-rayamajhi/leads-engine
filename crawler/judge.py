@@ -4,21 +4,12 @@ Pass A (free): phrase rules drop obvious non-leads before any LLM cost.
 Pass B: OpenRouter (free model) classifies survivors -> service, intent, summary, why_contact, score.
 Final intent_score = LLM score * source_weight * recency_decay (+ recency bonus).
 """
-import os, sys, json, time, pathlib, requests
+import os, sys, time, pathlib
 from datetime import datetime, timezone
-
-# OpenRouter (OpenAI-compatible). Primary + fallbacks: if one free pool is
-# rate-limited upstream, OpenRouter routes to the next automatically.
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODELS = [  # OpenRouter caps the fallback array at 3
-    "nvidia/nemotron-3-super-120b-a12b:free",
-    "minimax/minimax-m3:free",
-    "z-ai/glm-5.2:free",
-]
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from common import load_env, load_config  # noqa: E402
-import db  # noqa: E402
+import db, llm  # noqa: E402
 
 # Pass A: a rule hit means "possible problem" -> send to LLM. No hit -> drop.
 RULE_PHRASES = [
@@ -93,28 +84,15 @@ def final_score(llm_score, intent, source_weight, posted_at, source="google_revi
 
 
 def classify(key, sig) -> dict:
-    content = (PROMPT + f"\nSOURCE: {sig['source']}\nBUSINESS: {sig.get('who','')}\n"
-               f"TEXT: {sig.get('text','')}")
-    body = {"models": MODELS, "temperature": 0,
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "user", "content": content}]}
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    for attempt in range(4):
-        r = requests.post(OPENROUTER_URL, headers=headers, json=body, timeout=45)
-        if r.status_code == 429:  # all free pools busy -> back off and retry
-            time.sleep(6 * (attempt + 1))
-            continue
-        r.raise_for_status()
-        text = r.json()["choices"][0]["message"]["content"]
-        start, end = text.find("{"), text.rfind("}")  # be robust to stray prose
-        return json.loads(text[start:end + 1])
-    r.raise_for_status()  # exhausted retries
+    return llm.ask_json(
+        PROMPT + f"\nSOURCE: {sig['source']}\nBUSINESS: {sig.get('who','')}\n"
+                 f"TEXT: {sig.get('text','')}", key)
 
 
 def run(limit=None):
     load_env()
     cfg = load_config()
-    key = os.environ["OPENROUTER_API_KEY"]
+    key = llm.key()
     weights = cfg["source_weights"]
     svc_weights = cfg.get("service_weights", {})
 
@@ -136,7 +114,7 @@ def run(limit=None):
     updates = []
     for i, (sid, source, who, body, posted_at) in enumerate(survivors):
         if i:
-            time.sleep(4)  # OpenRouter free ~20 req/min
+            time.sleep(llm.PACE)
         try:
             r = classify(key, {"source": source, "who": who, "text": body})
         except Exception as e:  # ponytail: skip a bad row, don't kill the run

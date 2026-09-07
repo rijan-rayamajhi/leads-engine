@@ -33,5 +33,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Pipeline (reviews -> leads)
         run: python pipeline.py --once ${{ inputs.city && format('--city "{0}"', inputs.city) || '' }}
-      - name: Gap leads (no-website businesses)
+      - name: Gap leads (broken or missing websites)
         run: python gap.py
+      - name: Write call openers for new leads
+        run: python pitch.py
