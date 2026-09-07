@@ -1,10 +1,13 @@
-# Lead Engine — Technical System Design (v2, self-hosted / Vercel)
+# Lead Engine — Technical System Design (v3, self-hosted / Vercel)
+
+> v3 describes what is deployed. Reddit, Claude, NextAuth and the REST API routes
+> from v2 were all dropped or replaced; see §17 for what changed and why.
 
 Autonomously discover businesses with an *active digital problem*, judge intent,
 enrich to contact, verify, prioritize, and serve them to a sales team through a
 web dashboard. Deliver **Name + Phone + What they want + Why**, and learn from outcomes.
 
-Cost target: **~$0–5/month** (all free tiers except a few $ of Claude).
+Cost target: **~$0/month** (Places inside its free credit, judge on a free tier).
 
 ---
 
@@ -12,8 +15,10 @@ Cost target: **~$0–5/month** (all free tiers except a few $ of Claude).
 
 ```
 ┌─ CRAWLER (Python) ─────────────────────┐
-│  DISCOVER → JUDGE → ENRICH → VERIFY     │
-│  Runs on GitHub Actions cron, every 6h  │   (NOT on Vercel — long job, timeouts)
+│  pipeline.py: DISCOVER → JUDGE →        │
+│               ENRICH → VERIFY → DELIVER │
+│  gap.py:      DISCOVER → GAP → DELIVER  │  (no LLM, the gap is a fact)
+│  Runs on GitHub Actions cron, every 6h  │  (NOT on Vercel — long job, timeouts)
 └──────────────┬──────────────────────────┘
                │ upsert leads
                ▼
@@ -23,8 +28,8 @@ Cost target: **~$0–5/month** (all free tiers except a few $ of Claude).
                │ read leads / write status
                ▼
 ┌─ DASHBOARD (Next.js on Vercel) ────────┐
-│  per-rep login, list/filter/detail,     │
-│  status updates → FEEDBACK loop         │
+│  login + roles, board/detail/analytics, │
+│  status + notes → FEEDBACK loop         │
 └──────────────────────────────────────────┘
 ```
 
@@ -36,19 +41,27 @@ Three deployables, one shared DB. Clean seams: swap any layer without touching o
 
 | Layer            | Tech                                             | Cost | Why |
 |------------------|--------------------------------------------------|------|-----|
-| Crawler          | Python 3.12                                       | ~$0–5 | scrapers + APIs + LLM |
+| Crawler          | Python 3.12                                       | $0 | scrapers + APIs + LLM |
 | Crawler schedule | **GitHub Actions cron** (`schedule:` every 6h)   | free | no VPS, no ops |
 | Database         | **Postgres** — Neon (serverless)                | free tier | serverless-friendly, shared |
 | Dashboard        | **Next.js** (App Router, RSC) on **Vercel**      | free tier | fast web app |
-| Auth             | **NextAuth** — email magic-link, rep allowlist   | free | per-rep identity for feedback |
-| ORM/queries      | `postgres` (porsager) or Prisma                  | free | typed DB access |
+| Auth             | **custom**: HS256 JWT cookie (`jose`) + scrypt   | free | no dependency, no session table |
+| ORM/queries      | `@neondatabase/serverless` tagged templates      | free | parameterized, edge-friendly |
 | Phone verify     | `phonenumbers` (Python, local)                   | free | no API |
-| Email discovery  | website scrape (BeautifulSoup)                    | free | best-effort |
-| Reddit           | PRAW (official API)                              | free | intent posts |
-| Businesses       | Google Places API                                | $200/mo free credit | reviews + phone |
-| Judge            | Claude API (claude-sonnet-5)                     | ~$3–5/mo | intent classifier |
+| Email discovery  | homepage regex scrape (`requests` + `re`)         | free | best-effort |
+| Businesses       | Google Places API (New)                          | $200/mo free credit | reviews + phone in one call |
+| Judge            | **OpenRouter** free-tier models, 3-deep fallback | $0 | intent classifier |
 
-Dropped: Hunter, PDL, Twilio, Slack, Apify, LinkedIn (ToS-grey). Resend parked for future outreach.
+Dropped: Reddit/PRAW, Claude API, NextAuth, Resend, Hunter, PDL, Twilio, Slack,
+Apify, LinkedIn (ToS-grey), BeautifulSoup (a regex covers the one field we want).
+
+**Auth, concretely.** The cookie carries the email and nothing else; the role is
+re-read from `users` on every request (`lib/auth.ts`), so disabling or demoting
+someone takes effect on their next page load instead of at token expiry.
+Passwords are stdlib scrypt with the cost parameters stored inside the hash
+string, so raising them later still verifies every existing password. There is a
+first-run bootstrap: while `users` is empty, `USERS={"you@co":"pw"}` from env is
+accepted once, seeded as an admin with `must_change`, and ignored forever after.
 
 ---
 
@@ -57,28 +70,37 @@ Dropped: Hunter, PDL, Twilio, Slack, Apify, LinkedIn (ToS-grey). Resend parked f
 ```
 lead-engine/
 ├─ crawler/                     # Python pipeline
-│  ├─ pipeline.py               # orchestrator: --once / stage flags
-│  ├─ config.yaml               # city, categories, services, thresholds
-│  ├─ db.py                     # Postgres connection + upserts
-│  ├─ sources/
-│  │  ├─ places.py              # Google reviews + business harvest
-│  │  └─ reddit.py              # PRAW intent posts
-│  ├─ judge.py                  # rules + Claude classifier
+│  ├─ pipeline.py               # orchestrator: --once / --city / --skip
+│  ├─ gap.py                    # second factory: no-website leads, no LLM
+│  ├─ config.yaml               # city, categories, services, thresholds, phone_region
+│  ├─ common.py                 # .env loader, config overlays, norm_name
+│  ├─ db.py                     # Postgres connection + upserts + run rows
+│  ├─ sources/places.py         # Google reviews + business harvest
+│  ├─ judge.py                  # rules + OpenRouter classifier
 │  ├─ enrich.py                 # phone (Places) + email (site scrape)
 │  ├─ verify.py                 # phonenumbers + fuzzy dedupe
+│  ├─ feedback.py               # outcomes → weights.json overlay
+│  ├─ migrate_name_norm.py      # one-off: renormalize + merge company keys
 │  └─ requirements.txt
 ├─ web/                         # Next.js dashboard (Vercel root)
 │  ├─ app/
-│  │  ├─ page.tsx               # leads list + filters
-│  │  ├─ leads/[id]/page.tsx    # lead detail + status
-│  │  ├─ api/leads/route.ts     # GET list, PATCH status
-│  │  └─ auth/…                 # NextAuth routes
-│  ├─ lib/db.ts                 # Postgres queries
+│  │  ├─ (app)/page.tsx             # board: leads + filters + pagination
+│  │  ├─ (app)/leads/[id]/page.tsx  # detail: evidence, activity, status flow
+│  │  ├─ (app)/analytics/page.tsx   # win rates per source/service/bucket
+│  │  ├─ (app)/runs/page.tsx        # crawler health + recent runs
+│  │  ├─ (app)/settings/page.tsx    # crawler config + team management
+│  │  ├─ login/ · password/         # sign in, forced password change
+│  │  └─ actions.ts                 # every mutation (server actions, no REST)
+│  ├─ lib/                      # db, auth, password, leads, settings, market
 │  └─ package.json
-├─ schema.sql                   # Postgres tables (shared)
-├─ .github/workflows/crawl.yml  # cron every 6h → runs crawler
-└─ README.md                    # setup + deploy
+├─ schema.sql                   # Postgres tables (shared, idempotent)
+├─ .github/workflows/crawl.yml     # cron every 6h → pipeline.py + gap.py
+└─ .github/workflows/feedback.yml  # nightly → feedback.py
 ```
+
+**No REST API.** Every mutation is a Next.js server action in `app/actions.ts`,
+so there is no `/api/leads` route to keep in sync with the UI and no second
+place to re-check authorization.
 
 ---
 
@@ -88,22 +110,26 @@ Each source emits one uniform record:
 
 ```python
 Signal = {
-  "source": "google_reviews" | "reddit",
-  "who": str,            # business / poster name
-  "text": str,           # review / post body
+  "source": "google_reviews",
+  "who": str,            # business name
+  "text": str,           # review body
   "source_url": str,     # UNIQUE (dedupe key)
   "location": str | None,
   "posted_at": datetime,
-  "raw": dict,           # rating, subreddit, etc.
+  "raw": dict,           # place_id, phone, website, rating, review_count
 }
 ```
 
 | Source          | Tool               | Notes |
 |-----------------|--------------------|-------|
-| google_reviews  | Places details+reviews | name+phone+reviews in one shot |
-| reddit          | PRAW keyword search | r/smallbusiness, r/startups, service keywords |
+| google_reviews  | Places Text Search + reviews | name+phone+rating+reviews in one shot |
 
-Sources run in a thread pool; a failing source never blocks the others.
+Reddit was removed: PRAW needs per-user credentials, the subreddits it searched
+are mostly US-based, and none of its posts named a local business we could call.
+Business phone/website/rating ride along in `raw_signals.raw`, so ENRICH and
+`gap.py` reuse them without a second billed call.
+
+A failing category is caught and skipped; one bad search never kills the run.
 New signals upserted to `raw_signals` (conflict on `source_url` = skip).
 
 Adding a source later = one new file emitting `Signal`. Nothing downstream changes.
@@ -122,7 +148,10 @@ chatbot:  ["no reply","slow response","need support bot"]
 app:      ["app crashes","no online ordering","need an app"]
 ```
 
-**Pass B — Claude classifier.** One structured call per survivor:
+**Pass B — OpenRouter classifier.** One structured call per survivor, sent to a
+three-model free-tier fallback list so an upstream rate-limit routes onward
+instead of failing. 429s back off and retry; a row that still fails is skipped,
+not fatal.
 
 ```json
 { "has_problem": true,
@@ -133,8 +162,38 @@ app:      ["app crashes","no online ordering","need an app"]
   "score": 0-100 }
 ```
 
-`intent_score` = LLM score × source_weight × recency_decay (half-life 7d) + recency
-bonus (<24h → +10). Weights in `config.yaml`, tuned by FEEDBACK. Output → `judged`.
+`intent_score` = LLM score × intent_multiplier × source_weight × recency_decay
++ recency bonus (decay > 0.9 → +10). Weights in `config.yaml`, tuned by FEEDBACK.
+Results are written back onto the `raw_signals` row (there is no separate
+`judged` table).
+
+> **Known issue.** Decay is multiplicative with a 120-day half-life, which is
+> tuned for fresh forum intent, not for Google reviews that are routinely a year
+> old. A perfect 100 on a one-year-old review lands at 10 against a qualified
+> threshold of 50, so this path currently yields zero leads and `gap.py` produces
+> all of them. Fixing it means dropping or de-multiplying decay for reviews.
+
+The judge holds no DB connection across the LLM loop: it reads rows, closes,
+calls the model for each survivor, then reopens to write. A network drop mid-run
+costs the batch, never a stuck transaction.
+
+---
+
+## 4b. GAP — leads without an LLM
+
+`gap.py` is the second lead factory and, today, the only one producing output.
+It rereads the harvested businesses in `raw_signals.raw` and files a lead wherever
+the gap is a checkable fact rather than a judgement call:
+
+| Finding | Service | Base score |
+|---------|---------|-----------|
+| no website at all | website | 70 |
+| social page only (facebook / instagram / linktree) | website | 60 |
+
+Score rises with how established the business is: up to +20 for review count,
++10 for a rating at or above 4.0. A thriving 4.5★ place with 300 reviews and no
+site is a hotter call than a quiet one. Every gap lead has a phone, or it is
+skipped, and its evidence line states the fact a rep can verify in one look.
 
 ---
 
@@ -144,7 +203,7 @@ bonus (<24h → +10). Weights in `config.yaml`, tuned by FEEDBACK. Output → `j
 who ─► Places Text Search ─► place_id ─► phone, website, address, rating, category
 website ─► fetch homepage/contact ─► mailto: / email regex   (best-effort, free)
 ```
-Missing phone → keep lead; contact = `source_url` (e.g. Reddit thread).
+Missing phone → keep lead; contact = `source_url` (its Google Maps listing).
 Cached in `companies` (never re-enrich the same business).
 
 ---
@@ -180,11 +239,22 @@ Next.js reads `leads` from Postgres. Features for the sales team:
 - **Lead card:** name, phone (click-to-call `tel:`), what_they_want, evidence quote,
   why_contact, source link, score.
 - **Status dropdown:** new → contacted → replied → meeting → proposal → won/lost.
-  Writes back to `leads.status` + logs to `outcomes` with the rep's identity + timestamp.
-- **Assignment (optional):** claim a lead so two reps don't double-call.
-- **Auth:** NextAuth email magic-link; only allowlisted rep emails get in.
-
-API routes: `GET /api/leads` (filtered), `PATCH /api/leads/:id` (status/assignment).
+  Writes back to `leads.status` + logs to `outcomes` with the user's identity + timestamp.
+- **Assignment:** claim a lead so two people don't double-call. Claims release
+  automatically when an account is disabled.
+- **Notes:** an `outcomes` row with no status, so history accrues without moving the lead.
+- **Market lens:** a cookie, not a URL param, scoping the board, analytics and
+  runs to one crawled city. Only markets that actually hold leads are offered.
+- **Analytics:** win rate per source / service / bucket. Below 5 decided outcomes
+  it says how many more are needed rather than printing a fake 0% or 100%.
+- **Crawler runs:** every invocation writes a `runs` row, so "cron never fired"
+  reads differently from "cron fired and crashed". Flags staleness past 1.5 cycles.
+- **Settings (admin):** city, categories and thresholds, stored in the DB and
+  merged over `config.yaml`, so retargeting a crawl needs no commit or redeploy.
+  Changing thresholds re-buckets existing leads, since a bucket is only a view
+  of a score. Also holds team management: add, disable, set password, change role.
+- **Auth:** email + password, admin-provisioned, forced change on first login.
+  Two independent guards stop the last active admin being demoted or disabled.
 
 ---
 
@@ -200,6 +270,11 @@ Nightly GitHub Action:
 ---
 
 ## 10. Database schema (Postgres)
+
+`schema.sql` is the source of truth and is safe to re-run: every statement is
+`if not exists` or a guarded `do $$`. Beyond the four tables below it also holds
+`runs` (crawl history), `settings` (dashboard-editable crawler config), `users`
+(accounts), and the `city` / `company_id` columns added later.
 
 ```sql
 create table raw_signals (
@@ -250,42 +325,34 @@ city: "Kathmandu, Nepal"
 categories: [restaurant, retail, clinic, salon, hotel]
 services: [website, chatbot, whatsapp_bot, ai_phone, mobile_app, custom_software]
 thresholds: {hot: 90, warm: 70, qualified: 50}
-source_weights: {reddit: 0.9, google_reviews: 1.0}
+source_weights: {google_reviews: 1.0}
 freshness_ttl_days: 30
-env:
-  DATABASE_URL:       ENV
-  GOOGLE_PLACES_KEY:  ENV
-  ANTHROPIC_API_KEY:  ENV
-  REDDIT_CLIENT_ID:   ENV
-  REDDIT_CLIENT_SECRET: ENV
+phone_region: IN        # ISO region for numbers with no +country code
 ```
+
+Three layers, last one wins: `config.yaml` → `weights.json` (written nightly by
+`feedback.py`) → the `settings` table (edited in the dashboard). `load_config()`
+memoises the result, so one crawl sees one consistent config even if someone
+saves settings mid-run, and a missing DB degrades to the file rather than failing.
+
+Secrets are env-only, never in the file: `DATABASE_URL`, `GOOGLE_PLACES_KEY`,
+`OPENROUTER_API_KEY`, plus `AUTH_SECRET` and `USERS` for the dashboard.
 
 ---
 
 ## 12. Scheduling — GitHub Actions
 
-```yaml
-# .github/workflows/crawl.yml
-name: crawl
-on:
-  schedule: [{cron: "0 */6 * * *"}]   # every 6h
-  workflow_dispatch: {}
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: {python-version: "3.12"}
-      - run: pip install -r crawler/requirements.txt
-      - run: python crawler/pipeline.py --once
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          GOOGLE_PLACES_KEY: ${{ secrets.GOOGLE_PLACES_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
-          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
-```
+Two workflows, both with `workflow_dispatch` for manual runs:
+
+| Workflow | Cron | Does |
+|----------|------|------|
+| `crawl.yml` | `0 */6 * * *` | `pipeline.py --once` then `gap.py`. Accepts a `city` input to retarget one run. `concurrency: crawl` so two never overlap. |
+| `feedback.yml` | `0 2 * * *` | `feedback.py`, then commits `weights.json` if it changed. |
+
+Secrets: `DATABASE_URL`, `GOOGLE_PLACES_KEY`, `OPENROUTER_API_KEY`.
+
+`--city` sets `CRAWL_CITY`, which both `places.py` and `gap.py` read, so a
+retargeted run tags its leads with the market it actually scanned.
 
 ---
 
@@ -293,16 +360,17 @@ jobs:
 
 1. **DB:** create Neon project → run `schema.sql` → copy `DATABASE_URL`.
 2. **Crawler:** push repo → add secrets in GitHub → Actions runs on cron (or manual dispatch).
-3. **Dashboard:** import repo to Vercel, root = `web/`, set `DATABASE_URL` + NextAuth vars →
-   deploy → share the URL + add rep emails to the allowlist.
+3. **Dashboard:** import repo to Vercel, root = `web/`, set `DATABASE_URL`,
+   `AUTH_SECRET` (`openssl rand -hex 32`) and `USERS` → deploy → sign in as the
+   bootstrap admin, change the password, then add the team under Settings → Team.
 
 ---
 
 ## 14. Compliance (confirm per country)
 
 - B2B public business numbers: calling to offer service generally OK; verify locally.
-- Email outreach (future, via Resend): honor GDPR/CAN-SPAM — opt-out, identity.
-- Prefer official APIs (Places, Reddit) over ToS-grey scraping. LinkedIn excluded.
+- Email outreach (not built): would need GDPR/CAN-SPAM opt-out + identity.
+- Prefer official APIs (Places) over ToS-grey scraping. LinkedIn excluded.
 - Retention: purge DROP leads after 30d.
 
 ---
@@ -312,21 +380,40 @@ jobs:
 | Item | Cost |
 |------|------|
 | Google Places | $0 (inside $200/mo credit) |
-| Claude Judge | ~$3–5/mo |
+| Judge (OpenRouter free tier) | $0 |
 | Neon / Vercel / GitHub Actions | free tier |
-| **Total** | **~$0–5/month** |
+| **Total** | **~$0/month** |
 
 ---
 
-## 16. Build order
+## 16. Build order (done)
 
 1. `schema.sql` + Neon + `crawler/db.py`
 2. `sources/places.py` (first real data)
-3. `judge.py` (rules + Claude)
+3. `judge.py` (rules + LLM)
 4. `enrich.py` + `verify.py`
 5. `pipeline.py --once` end-to-end → rows in Postgres
-6. Next.js dashboard: list + filter + detail + status
-7. NextAuth rep login
-8. `sources/reddit.py`
-9. GitHub Actions cron + nightly FEEDBACK retune
-```
+6. `gap.py` (the factory that actually produces leads)
+7. Next.js dashboard: board, detail, analytics, runs, settings
+8. Email/password auth, roles, team management
+9. GitHub Actions cron + nightly feedback retune
+
+Not built: retention purge of DROP leads older than 30d; a trained scoring model
+to replace the linear win-rate heuristic; outreach/send.
+
+---
+
+## 17. What changed from v2
+
+| v2 said | Reality | Why |
+|---------|---------|-----|
+| Reddit via PRAW | removed | per-user creds, US-centric subs, no callable local businesses |
+| Claude API judge | OpenRouter free models | the judge is a cheap classifier; free tier covers it |
+| NextAuth magic-link + Resend | email/password, custom JWT + scrypt | no mail provider to own, and admin-provisioned accounts suit a small team |
+| `GET/PATCH /api/leads` | server actions in `app/actions.ts` | one place to authorize, nothing to keep in sync |
+| `judged` table | columns on `raw_signals` | one row per signal, no join |
+| one lead factory | two (`pipeline.py`, `gap.py`) | verifiable gaps beat LLM judgement on aged reviews |
+| single city | markets, DB-backed settings | retarget without a commit; leads keep the city they were found in |
+
+Added since: `runs` (crawl observability), `settings` (editable config), `users`
+(accounts + roles), `city` (market scoping), `feedback.py` (weight retuning).

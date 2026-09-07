@@ -136,7 +136,9 @@ export async function getRuns(limit = 25, market = "all") {
     sql`select id, job, city, started_at, finished_at, signals_new, leads_new, stats, error
         from runs where (${market} = 'all' or city = ${market})
         order by started_at desc limit ${limit}`,
-    sql`select max(started_at) as at from runs where error is null and finished_at is not null`,
+    sql`select max(started_at) as at from runs
+        where error is null and finished_at is not null
+          and (${market} = 'all' or city = ${market})`,
   ]);
   return {
     runs: runs as Run[],

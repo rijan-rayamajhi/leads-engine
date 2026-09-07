@@ -7,10 +7,10 @@ Score rises with how established the business is (rating x review_count): a
 thriving 4.5* place with 300 reviews and no site is a hotter lead than a quiet one.
 Every lead here has a phone (callable) and a checkable reason.
 """
-import sys, pathlib
+import os, sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config  # noqa: E402
+from common import load_env, load_config, norm_name  # noqa: E402
 import db  # noqa: E402
 
 SOCIAL = ("facebook.com", "instagram.com", "linktr.ee", "linktree")
@@ -42,12 +42,17 @@ def bucket_for(s, th):
     return "DROP"
 
 
+def city_for(cfg):
+    """Same resolution as sources/places.py: a --city run must tag its leads with
+    the city it actually scanned, not the configured default."""
+    return os.environ.get("CRAWL_CITY") or cfg["city"]
+
+
 def run():
     load_env()
     cfg = load_config()
-    th = cfg["thresholds"]
     with db.conn() as c:
-        run_id = db.start_run(c, "gap", cfg["city"])
+        run_id = db.start_run(c, "gap", city_for(cfg))
     try:
         created = _run(cfg)
     except Exception as e:
@@ -60,7 +65,7 @@ def run():
 
 
 def _run(cfg):
-    th, city = cfg["thresholds"], cfg["city"]
+    th, city = cfg["thresholds"], city_for(cfg)
     with db.conn() as c:
         rows = c.execute("""
             select distinct on (raw->>'place_id')
@@ -84,7 +89,7 @@ def _run(cfg):
                 continue  # dedupe
             social_only = bool(website)
             s = score(rating, rc, social_only)
-            cid = db.upsert_company(c, who.lower().strip(), place_id=pid, phone=phone,
+            cid = db.upsert_company(c, norm_name(who), place_id=pid, phone=phone,
                                     website=website, category=cat, rating=rating,
                                     review_count=rc, city=city)
             evidence = (f"{cat or 'Business'}, {rating or '?'}★ ({rc or 0} reviews), "

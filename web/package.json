@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "test:auth": "node --env-file=.env.local lib/auth.test.mjs",
-    "test": "node lib/leads.test.mjs && node lib/settings.test.mjs && node lib/password.test.mjs && npm run test:auth"
+    "test": "node lib/leads.test.mjs && node lib/settings.test.mjs && node lib/password.test.mjs",
+    "test:all": "npm test && npm run test:auth"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",

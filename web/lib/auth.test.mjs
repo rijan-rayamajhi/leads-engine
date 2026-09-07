@@ -1,5 +1,6 @@
 /** Auth and permissions, against a running dev server:
  *    npm run dev   then   npm run test:auth
+ *  Kept out of `npm test` because it needs that server; `npm run test:all` runs both.
  *  Seeds two throwaway users, exercises every gate, removes them again. */
 import assert from "node:assert/strict";
 import { neon } from "@neondatabase/serverless";

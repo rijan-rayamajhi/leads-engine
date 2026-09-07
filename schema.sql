@@ -87,6 +87,12 @@ create table if not exists settings (
   updated_at timestamptz default now()
 );
 
+-- ENRICH links each judged signal to the company it resolved to. Lived only as
+-- a hand-applied ALTER for a while, so a fresh database could not run the
+-- pipeline at all; kept as an ALTER to stay idempotent on existing databases.
+alter table raw_signals add column if not exists company_id bigint references companies(id);
+create index if not exists idx_raw_signals_company_id on raw_signals (company_id);
+
 -- Market = the city the crawl targeted, NOT the business's address city.
 -- (Valley suburbs like Lalitpur and Devanagari spellings would split one market
 -- into phantom ones if this were parsed from the address.)

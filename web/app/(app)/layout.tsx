@@ -1,7 +1,7 @@
 import AppShell from "@/components/app-shell";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth";
-import { getMarkets, getSettings } from "@/lib/db";
+import { getMarkets } from "@/lib/db";
 import { currentMarket } from "@/lib/market";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

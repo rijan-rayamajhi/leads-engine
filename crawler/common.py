@@ -1,5 +1,5 @@
 """Shared helpers: load .env and config."""
-import os, pathlib, yaml
+import os, pathlib, re, unicodedata, yaml
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -48,3 +48,29 @@ def load_config(refresh=False):
 
     _CONFIG = cfg
     return cfg
+
+
+def norm_name(name: str) -> str:
+    """Normalized company key. Shared by every writer of companies.name_norm:
+    two spellings of one business must collapse to the same row.
+
+    NFKD first, so an accented letter folds to its ASCII base instead of being
+    stripped: without it "cafe" and "café" become different keys and the dedupe
+    this function exists for silently fails."""
+    decomposed = unicodedata.normalize("NFKD", name or "")
+    ascii_only = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
+    return re.sub(r"[^a-z0-9]+", " ", ascii_only.lower()).strip()
+
+
+def _selfcheck_norm_name():
+    assert norm_name("café amudham") == norm_name("cafe amudham") == "cafe amudham"
+    assert norm_name("Anna\u2019s Boutique") == "anna s boutique"
+    assert norm_name("#One Salon") == "one salon"
+    assert norm_name("flux.fit gym") == "flux fit gym"
+    assert norm_name(None) == "" and norm_name("") == ""
+    assert norm_name(norm_name("A-B!")) == norm_name("A-B!")  # idempotent
+    print("norm_name selfcheck ok")
+
+
+if __name__ == "__main__":
+    _selfcheck_norm_name()

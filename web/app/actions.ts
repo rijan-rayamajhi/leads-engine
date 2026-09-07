@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireAdmin, requireSession, signIn, signOut } from "@/lib/auth";
-import { findUserWithHash, sql } from "@/lib/db";
+import { activeAdminCount, findUserWithHash, sql } from "@/lib/db";
 import { checkPassword, hashPassword, verifyPassword } from "@/lib/password";
 import { parseSettings } from "@/lib/settings";
 import { MARKET_COOKIE } from "@/lib/market";
@@ -189,14 +189,25 @@ export async function setUserPassword(_prev: unknown, formData: FormData) {
   return { ok: true, message: `Password set for ${email}. They must change it at next login.` };
 }
 
-/* Self-change is blocked on both actions below, and that is what keeps at least
-   one active admin: demoting or disabling another admin means a second admin
-   (you) already exists. */
+/* Two independent guards keep at least one admin who can still sign in:
+   you cannot act on yourself, AND the count below refuses any change that would
+   take the last active admin away. The self-block alone would be enough today,
+   but it is the kind of thing a later refactor quietly removes. */
+
+async function assertNotLastAdmin(email: string, what: string) {
+  const [target] = (await sql`
+    select role, disabled_at from users where email = ${email}
+  `) as { role: string; disabled_at: string | null }[];
+  if (!target || target.role !== "admin" || target.disabled_at) return; // not an active admin
+  if ((await activeAdminCount()) <= 1)
+    throw new Error(`cannot ${what} the last active admin`);
+}
 
 export async function setUserRole(email: string, role: string) {
   const me = await requireAdmin();
   if (!ROLES.includes(role)) throw new Error(`unknown role: ${role}`);
   if (email === me.email) throw new Error("you cannot change your own role");
+  if (role !== "admin") await assertNotLastAdmin(email, "demote");
   await sql`update users set role = ${role} where email = ${email}`;
   revalidatePath("/settings");
 }
@@ -204,6 +215,7 @@ export async function setUserRole(email: string, role: string) {
 export async function setUserDisabled(email: string, disabled: boolean) {
   const me = await requireAdmin();
   if (email === me.email) throw new Error("you cannot disable your own account");
+  if (disabled) await assertNotLastAdmin(email, "disable");
 
   if (disabled) {
     await sql`update users set disabled_at = now() where email = ${email}`;

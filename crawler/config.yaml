@@ -34,5 +34,9 @@ source_weights:        # tuned by the feedback loop over time
 
 freshness_ttl_days: 30
 
+# Region for phone numbers that arrive without a +country code (ISO 3166-1).
+# Must match the market in `city`, or valid local numbers get flagged invalid.
+phone_region: IN
+
 # Secrets come from environment, never this file:
 #   DATABASE_URL GOOGLE_PLACES_KEY OPENROUTER_API_KEY
