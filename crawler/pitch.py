@@ -132,23 +132,30 @@ def run(limit=None):
     print(f"pitching {len(leads)} leads")
 
     # Slow calls with NO DB connection held, same shape as judge.run.
-    written = []
+    written, failed, empty = [], 0, 0
     for i, lead in enumerate(leads):
         if i:
             time.sleep(llm.PACE)
         try:
             got = write_one(lead, lead["city"] or cfg.get("city"), key)
         except Exception as e:   # ponytail: skip a bad row, never kill the run
-            print(f"  pitch failed id={lead['id']}: {e}", file=sys.stderr)
+            print(f"  pitch failed {lead['name']!r}: {e}", file=sys.stderr)
+            failed += 1
             continue
         if got:
             written.append((got[0], got[1], lead["id"]))
+        else:
+            # A silent None used to vanish here: one run wrote 28 of 68 and the
+            # other 40 were unaccounted for, 16 of them because of this branch.
+            empty += 1
+            print(f"  no usable opener for {lead['name']!r}", file=sys.stderr)
 
     with db.conn() as c:
         for opener, angle, lid in written:
             c.execute("""update leads set pitch=%s, pitch_angle=%s, pitch_at=now()
                          where id=%s""", (opener, angle, lid))
-    print(f"  {len(written)} pitches written")
+    print(f"  {len(written)} written, {failed} failed, {empty} returned nothing "
+          f"({len(leads)} attempted)")
     return len(written)
 
 
