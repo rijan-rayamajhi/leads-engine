@@ -8,7 +8,7 @@ import sys, time, pathlib
 from datetime import datetime, UTC
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config
+from common import batched, load_config, load_env
 import db, llm
 
 # Pass A: a rule hit means "possible problem" -> send to LLM. No hit -> drop.
@@ -139,12 +139,14 @@ def run(limit=None):
         updates.append((r.get("service"), r.get("intent"), score,
                         r.get("summary"), r.get("why_contact"), sid))
 
-    # 3. Write results in one short DB session.
-    with db.conn() as c:
-        for u in updates:
-            c.execute(
-                "update raw_signals set judged_at=now(), service=%s, intent=%s, "
-                "intent_score=%s, summary=%s, why_contact=%s where id=%s", u)
+    # 3. Write results in short DB sessions, a batch at a time. Holding them
+    # all until the end meant one late failure discarded every earlier result.
+    for batch in batched(updates, 25):
+        with db.conn() as c:
+            for u in batch:
+                c.execute(
+                    "update raw_signals set judged_at=now(), service=%s, intent=%s, "
+                    "intent_score=%s, summary=%s, why_contact=%s where id=%s", u)
     print(f"  {len(updates)} scored by LLM")
     return len(updates)
 

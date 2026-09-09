@@ -24,6 +24,8 @@ import db, llm
 import time
 
 MAX_CHARS = 400   # a pitch a rep reads at a glance, not a paragraph
+FLUSH_EVERY = 10  # write partway through: a crash at lead 52 of 53 used to
+                  # discard all 52, because results were held until the end
 
 PROMPT = """You write one-line call openers for a digital-services agency in {city}.
 A rep is about to phone this business. Give them the angle.
@@ -131,8 +133,18 @@ def run(limit=None):
     leads = [dict(zip(cols, r, strict=True)) for r in rows]
     print(f"pitching {len(leads)} leads")
 
+    def flush(rows):
+        """Short DB session, opened only once a batch is ready. Keeps the
+        original property that no connection is held across a network call."""
+        if not rows:
+            return
+        with db.conn() as c:
+            for opener, angle, lid in rows:
+                c.execute("""update leads set pitch=%s, pitch_angle=%s, pitch_at=now()
+                             where id=%s""", (opener, angle, lid))
+
     # Slow calls with NO DB connection held, same shape as judge.run.
-    written, failed, empty = [], 0, 0
+    pending, done, failed, empty = [], 0, 0, 0
     for i, lead in enumerate(leads):
         if i:
             time.sleep(llm.PACE)
@@ -143,20 +155,23 @@ def run(limit=None):
             failed += 1
             continue
         if got:
-            written.append((got[0], got[1], lead["id"]))
+            pending.append((got[0], got[1], lead["id"]))
+            if len(pending) >= FLUSH_EVERY:
+                flush(pending)
+                done += len(pending)
+                pending = []
+                print(f"  {done} written so far", flush=True)
         else:
             # A silent None used to vanish here: one run wrote 28 of 68 and the
             # other 40 were unaccounted for, 16 of them because of this branch.
             empty += 1
             print(f"  no usable opener for {lead['name']!r}", file=sys.stderr)
 
-    with db.conn() as c:
-        for opener, angle, lid in written:
-            c.execute("""update leads set pitch=%s, pitch_angle=%s, pitch_at=now()
-                         where id=%s""", (opener, angle, lid))
-    print(f"  {len(written)} written, {failed} failed, {empty} returned nothing "
+    flush(pending)
+    done += len(pending)
+    print(f"  {done} written, {failed} failed, {empty} returned nothing "
           f"({len(leads)} attempted)")
-    return len(written)
+    return done
 
 
 def _selfcheck():

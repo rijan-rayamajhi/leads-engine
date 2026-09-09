@@ -69,6 +69,22 @@ def norm_name(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", ascii_only.lower()).strip()
 
 
+def batched(items, size):
+    """Yield successive lists of at most `size`. Used to flush slow work to the
+    database as it completes, so a crash late in a long run does not discard
+    everything that already succeeded."""
+    if size < 1:
+        raise ValueError("size must be >= 1")
+    batch = []
+    for item in items:
+        batch.append(item)
+        if len(batch) == size:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
+
+
 def _selfcheck_norm_name():
     assert norm_name("café amudham") == norm_name("cafe amudham") == "cafe amudham"
     assert norm_name("Anna\u2019s Boutique") == "anna s boutique"
@@ -76,7 +92,19 @@ def _selfcheck_norm_name():
     assert norm_name("flux.fit gym") == "flux fit gym"
     assert norm_name(None) == "" and norm_name("") == ""
     assert norm_name(norm_name("A-B!")) == norm_name("A-B!")  # idempotent
-    print("norm_name selfcheck ok")
+
+    assert list(batched([], 3)) == []
+    assert list(batched([1, 2, 3], 3)) == [[1, 2, 3]]          # exact multiple
+    assert list(batched([1, 2, 3, 4], 3)) == [[1, 2, 3], [4]]  # remainder kept
+    assert list(batched([1], 10)) == [[1]]                     # short input
+    assert sum(len(b) for b in batched(range(97), 10)) == 97    # nothing dropped
+    assert all(len(b) <= 10 for b in batched(range(97), 10))
+    try:
+        list(batched([1], 0))
+        raise AssertionError("size 0 should raise")
+    except ValueError:
+        pass
+    print("common selfcheck ok")
 
 
 if __name__ == "__main__":
