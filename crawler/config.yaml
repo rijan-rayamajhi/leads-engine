@@ -54,4 +54,4 @@ site_check_ttl_days: 14
 
 # Secrets come from environment, never this file:
 #   DATABASE_URL GOOGLE_PLACES_KEY OPENROUTER_API_KEY
-#   OPENROUTER_API_KEY_2 (optional 2nd key; used once the 1st key's quota runs out)
+#   OPENROUTER_API_KEY_2, _3, ... (optional extra keys; each used once the prior key's quota runs out)
