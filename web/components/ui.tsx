@@ -41,3 +41,10 @@ export const BTN =
 /** Filter-bar pill: same 36px height as Select so a row of them lines up. */
 export const CHIP =
   "inline-flex h-9 items-center rounded-pill px-3.5 text-sm font-medium transition";
+
+/** One shimmering placeholder block. Defaults to a pill (a text line); pass
+ *  rounded-card / rounded-xl for a larger surface. Decorative, so aria-hidden -
+ *  the loading.tsx wrapper carries the single aria-busy/status for the region. */
+export function Skeleton({ className = "" }: { className?: string }) {
+  return <div aria-hidden className={`skeleton rounded-pill ${className}`} />;
+}

@@ -32,6 +32,25 @@ body { background: var(--color-bg); color: var(--color-ink); }
 /* Urbanist 300 is for display numerals only; it goes illegible below ~32px. */
 .numeral { font-weight: 300; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 
+/* Skeleton shimmer for loading states: a slow sweep between the two quietest
+   tokens (sunken -> line) so it reads as "placeholder", never as content. The
+   theme has no borders, so skeletons carry shape with radii + the card shadow,
+   same as real surfaces. Motion off for users who ask for less of it. */
+.skeleton {
+  background:
+    linear-gradient(90deg, var(--color-sunken) 25%, var(--color-line) 37%, var(--color-sunken) 63%)
+    var(--color-sunken);
+  background-size: 200% 100%;
+  animation: skeleton-sweep 1.5s ease-in-out infinite;
+}
+@keyframes skeleton-sweep {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
 /* Fallback focus ring for anything that does not define its own (links, icon
    buttons, nav). It sits in the base layer so a control with its own focus
    treatment overrides it rather than drawing a second indicator on top. */
