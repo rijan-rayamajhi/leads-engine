@@ -128,22 +128,33 @@ def _ask_once(prompt, api_key, json_mode, temperature):
     raise TransientLLMError(f"{RETRIES} attempts failed, last: {last}")
 
 
+# Keys whose daily quota is spent for THIS process. A run is one process, so a
+# key that 429s its way out once should not be retried (4 attempts x backoff
+# ~36s) on every later batch - that was the "stuck" symptom. Reset naturally
+# next cron, which is a fresh process by which time the quota has rolled over.
+_spent = set()
+
+
 def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
     """One call, returns the parsed JSON object. Rotates through every
-    configured key: when a key's quota is spent (all-429) it switches to the
-    next and retries the same call. RateLimitError only escapes once EVERY key
-    is exhausted, so the batch's circuit breaker stops the run only when there
-    is genuinely no budget left anywhere."""
+    configured key, skipping any already known spent this run: when a key's
+    quota is spent (all-429) it is remembered and the next key is tried.
+    RateLimitError only escapes once EVERY key is exhausted, so the batch's
+    circuit breaker stops the run only when there is genuinely no budget left."""
     keys = [api_key] if api_key else all_keys()
+    live = [k for k in keys if k not in _spent]
+    if not live:
+        raise RateLimitError("all keys quota-exhausted this run")
     last = None
-    for i, k in enumerate(keys):
+    for i, k in enumerate(live):
         try:
             return _ask_once(prompt, k, json_mode, temperature)
         except RateLimitError as e:
             last = e
-            if i + 1 < len(keys):
-                print(f"  key #{i + 1} quota spent, switching to key #{i + 2}",
-                      file=sys.stderr)
+            _spent.add(k)   # skip this key for the rest of the run
+            if i + 1 < len(live):
+                print(f"  a key's quota is spent, switching to the next "
+                      f"({len(live) - i - 1} left)", file=sys.stderr)
     raise last  # all keys 429 -> real quota wall, let the caller stop the batch
 
 
