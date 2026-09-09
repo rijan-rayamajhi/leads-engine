@@ -13,11 +13,20 @@ class TransientLLMError(RuntimeError):
     """A failure worth retrying: provider hiccup, empty pool, network blip."""
 
 
+class RateLimitError(TransientLLMError):
+    """Every retry died on HTTP 429. On free models this means the daily quota
+    is spent, not a passing blip: no pace fixes a daily cap, so the caller
+    should stop the batch rather than 429 its way through the rest."""
+
+
 URL = "https://openrouter.ai/api/v1/chat/completions"
-MODELS = [  # OpenRouter caps the fallback array at 3
+MODELS = [  # OpenRouter caps the fallback array at 3. All 3 verified live on
+            # OpenRouter and support response_format=json_object (checked via
+            # /api/v1/models). Gemma leads because it writes the most natural
+            # openers; nemotron-super is the heavier fallback for classification.
+    "google/gemma-4-31b-it:free",
     "nvidia/nemotron-3-super-120b-a12b:free",
-    "minimax/minimax-m3:free",
-    "z-ai/glm-5.2:free",
+    "google/gemma-4-26b-a4b-it:free",
 ]
 PACE = 4        # seconds between calls; free tier is ~20 req/min
 RETRIES = 4
@@ -76,18 +85,25 @@ def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
                "Content-Type": "application/json"}
 
     last = None
+    all_429 = True
     for attempt in range(RETRIES):
         try:
             r = requests.post(URL, headers=headers, json=body, timeout=60)
-            if r.status_code == 429 or r.status_code >= 500:
-                last = TransientLLMError(f"HTTP {r.status_code}")
+            if r.status_code == 429:
+                last = TransientLLMError("HTTP 429")
+            elif r.status_code >= 500:
+                last, all_429 = TransientLLMError(f"HTTP {r.status_code}"), False
             else:
                 r.raise_for_status()
                 return _extract(_content(r.json()))
         except (requests.RequestException, TransientLLMError, ValueError) as e:
+            if not (isinstance(e, TransientLLMError) and str(e) == "HTTP 429"):
+                all_429 = False
             last = e
         if attempt < RETRIES - 1:
             time.sleep(BACKOFF * (attempt + 1))
+    if all_429:
+        raise RateLimitError(f"{RETRIES} attempts all 429 (free-model quota spent?)")
     raise TransientLLMError(f"{RETRIES} attempts failed, last: {last}")
 
 
@@ -124,6 +140,9 @@ def _selfcheck():
     except TransientLLMError as e:
         assert "pool exhausted" in str(e)
 
+    # RateLimitError is a TransientLLMError so existing handlers still catch it,
+    # but callers can single it out to stop a batch when the quota is spent.
+    assert issubclass(RateLimitError, TransientLLMError)
     assert len(MODELS) <= 3, "OpenRouter caps the fallback array at 3"
     print("llm selfcheck ok")
 

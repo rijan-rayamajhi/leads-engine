@@ -19,13 +19,11 @@ the pipeline is unharmed: AI enriches leads here, it never decides they exist.
 import re, sys, pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from common import load_env, load_config
+from common import load_env, load_config, batched
 import db, llm
 import time
 
 MAX_CHARS = 400   # a pitch a rep reads at a glance, not a paragraph
-FLUSH_EVERY = 10  # write partway through: a crash at lead 52 of 53 used to
-                  # discard all 52, because results were held until the end
 
 PROMPT = """You write one-line call openers for a digital-services agency in {city}.
 A rep is about to phone this business. Give them the angle.
@@ -57,6 +55,99 @@ def reputation(rating, review_count):
     if review_count:
         return f"{review_count} Google reviews"
     return "no reliable rating data"
+
+
+# Batch header. The quality of these openers lives or dies on this prompt, so
+# it teaches the craft (Gong's 300M-call analysis: a specific reason tied to the
+# prospect lifts pickup ~2.1x) and shows the voice with worked examples. The
+# number-guard in pitch_batch still rejects any invented figure per lead, so the
+# example numbers below can't leak into a real pitch.
+PROMPT_BATCH = """You write the ONE line a salesperson says when they cold-call a
+local business for a digital-services agency. This is the hardest 10 seconds in
+sales: sound generic and they hang up. Your line has to earn the next 20 seconds.
+
+WHAT A GREAT OPENER DOES (learn the thinking, never copy the wording):
+1. Opens with something REAL about THIS business - their reputation, their type,
+   the exact problem found. Never a generic line about "today's digital world".
+2. Names ONE concrete problem and its ACTUAL cost to them: lost bookings,
+   customers landing on a competitor, calls going unanswered. Customers or money,
+   never vague "online presence" or "digital footprint".
+3. Sounds like a human talking out loud - short sentences, plain words, the way
+   you'd tip off a friend. Not marketing copy.
+
+NEVER: greetings ("Hi, I hope you're well"), buzzwords ("leverage", "solutions",
+"revolutionary", "take your business to the next level", "in today's digital
+world"), exclamation marks, or claiming you visited/called/are a customer.
+
+GOOD - study the voice:
+- Facts: Kamat's | restaurant | 4.6 stars / 892 reviews | problem: no website | sell: website
+  opener: "Your 4.6 across nearly 900 reviews tells me people love the place - but there's no website, so anyone Googling 'restaurants near me' is landing on your competitors instead of you."
+  angle: "A loved restaurant losing new diners to rivals who show up in search."
+- Facts: Sunrise Dental | dentist | no rating data | problem: never answers the phone | sell: ai_phone
+  opener: "A few reviews mention calling to book and nobody picking up. For a clinic that usually means the patient just booked with the dentist down the road instead."
+  angle: "Every missed call is a booked appointment walking to a competitor."
+
+BAD - never write like this (vague, salesy, no real hook):
+  "In today's digital world, a strong online presence is essential. We offer
+  website solutions to help take your business to the next level."
+
+FACTS RULE: use ONLY each business's listed facts. Never state a number not
+listed for it. If the facts are thin, stay general and human - do not invent detail.
+
+Write ONE opener per business below.
+
+Return ONLY compact JSON, one object per business, SAME ORDER, echoing the number as "i":
+{"results":[{"i":0,"opener":"<=35 spoken words: the specific problem + its real cost, no greeting","angle":"<=15 words: the commercial reason THIS business should care"}, ...]}
+
+BUSINESSES:
+"""
+
+
+def build_item(lead, city):
+    """One compact line per lead for the batch prompt, same verified facts as
+    build_prompt feeds a single call."""
+    return (f"City: {city or 'this city'} | Business: {lead['name'] or 'this business'} "
+            f"| Type: {lead['category'] or 'local business'} "
+            f"| Reputation: {reputation(lead.get('rating'), lead.get('review_count'))} "
+            f"| Confirmed problem: "
+            f"{lead['why_contact'] or lead['evidence_quote'] or 'weak online presence'} "
+            f"| Sell: {lead['service'] or 'website'}")
+
+
+def _align(results, n):
+    """Map an LLM results array back to n inputs by echoed "i", else position."""
+    by_i = {}
+    for r in results:
+        if isinstance(r, dict):
+            try:
+                by_i[int(r["i"])] = r
+            except (KeyError, TypeError, ValueError):
+                pass
+    if len(by_i) == n and set(by_i) == set(range(n)):
+        return [by_i[i] for i in range(n)]
+    return [results[i] if i < len(results) and isinstance(results[i], dict) else None
+            for i in range(n)]
+
+
+def pitch_batch(items, key=None):
+    """items: list of (lead, city). Returns list aligned to items of
+    (opener, angle), or None where the model gave nothing usable or invented a
+    number for that lead. One rejected lead never taints its batch-mates."""
+    body = "\n".join(f"[{i}] {build_item(lead, city)}"
+                     for i, (lead, city) in enumerate(items))
+    out = llm.ask_json(PROMPT_BATCH + body, key)
+    results = _align(out.get("results", []) if isinstance(out, dict) else [], len(items))
+    aligned = []
+    for (lead, _city), r in zip(items, results, strict=True):
+        if not isinstance(r, dict):
+            aligned.append(None)
+            continue
+        opener, angle = clean(r.get("opener")), clean(r.get("angle"), 120)
+        if not opener or unverified_numbers(opener + " " + angle, lead):
+            aligned.append(None)     # invented number or empty -> keep rule text
+            continue
+        aligned.append((opener, angle))
+    return aligned
 
 
 def build_prompt(lead, city):
@@ -100,38 +191,29 @@ def clean(text, limit=MAX_CHARS):
     return t[:limit].rstrip()
 
 
-def write_one(lead, city, key=None):
-    """Returns (opener, angle), or None if the model gave nothing usable or
-    invented a number. Rejecting beats correcting: the rule-written why_contact
-    is already accurate, so a discarded pitch costs polish, not truth."""
-    r = llm.ask_json(build_prompt(lead, city), key)
-    opener, angle = clean(r.get("opener")), clean(r.get("angle"), 120)
-    if not opener:
-        return None
-    bogus = unverified_numbers(opener + " " + angle, lead)
-    if bogus:
-        raise ValueError(f"invented numbers {sorted(bogus)}")
-    return (opener, angle)
-
-
 def run(limit=None):
     load_env()
     cfg = load_config()
     key = llm.key()
 
+    # Per-run cap: pitch the highest-intent leads first (SQL order), cap the
+    # count; the rest keep their rule-written why_contact and pitch next cron.
+    lc = cfg.get("llm", {})
+    size = int(lc.get("batch_size", 15))
+    cap = int(limit) if limit else int(lc.get("max_per_run", 200))
     with db.conn() as c:
-        rows = c.execute(f"""
+        rows = c.execute("""
             select l.id, l.name, l.service, l.why_contact, l.evidence_quote, l.city,
                    c.category, c.rating, c.review_count
             from leads l left join companies c on c.id = l.company_id
             where l.pitch is null and l.bucket in ('HOT','WARM','QUALIFIED')
             order by l.intent_score desc nulls last
-            {f'limit {int(limit)}' if limit else ''}
-        """).fetchall()
+            limit %s
+        """, (cap,)).fetchall()
     cols = ["id", "name", "service", "why_contact", "evidence_quote", "city",
             "category", "rating", "review_count"]
     leads = [dict(zip(cols, r, strict=True)) for r in rows]
-    print(f"pitching {len(leads)} leads")
+    print(f"pitching {len(leads)} leads in batches of {size}")
 
     def flush(rows):
         """Short DB session, opened only once a batch is ready. Keeps the
@@ -143,32 +225,38 @@ def run(limit=None):
                 c.execute("""update leads set pitch=%s, pitch_angle=%s, pitch_at=now()
                              where id=%s""", (opener, angle, lid))
 
-    # Slow calls with NO DB connection held, same shape as judge.run.
+    # Slow calls with NO DB connection held, one call per batch of `size`.
     pending, done, failed, empty = [], 0, 0, 0
-    for i, lead in enumerate(leads):
-        if i:
+    for b, chunk in enumerate(batched(leads, size)):
+        if b:
             time.sleep(llm.PACE)
+        items = [(lead, lead["city"] or cfg.get("city")) for lead in chunk]
         try:
-            got = write_one(lead, lead["city"] or cfg.get("city"), key)
-        except Exception as e:   # ponytail: skip a bad row, never kill the run
-            print(f"  pitch failed {lead['name']!r}: {e}", file=sys.stderr)
-            failed += 1
+            got = pitch_batch(items, key)
+        except llm.RateLimitError:
+            # Quota spent; remaining leads keep their accurate rule-written
+            # why_contact and get pitched on the next run. Stop, don't grind.
+            print(f"  rate-limited, stopping after {done + len(pending)}/{len(leads)} pitched",
+                  file=sys.stderr)
+            break
+        except Exception as e:   # ponytail: lose one batch, never kill the run
+            print(f"  pitch batch failed ({len(chunk)} leads): {e}", file=sys.stderr)
+            failed += len(chunk)
             continue
-        if got:
-            pending.append((got[0], got[1], lead["id"]))
-            if len(pending) >= FLUSH_EVERY:
-                flush(pending)
-                done += len(pending)
-                pending = []
-                print(f"  {done} written so far", flush=True)
-        else:
-            # A silent None used to vanish here: one run wrote 28 of 68 and the
-            # other 40 were unaccounted for, 16 of them because of this branch.
-            empty += 1
-            print(f"  no usable opener for {lead['name']!r}", file=sys.stderr)
+        for lead, res in zip(chunk, got, strict=True):
+            if res:
+                pending.append((res[0], res[1], lead["id"]))
+            else:
+                # No usable opener (empty or invented a number): the lead keeps
+                # its accurate rule-written why_contact, so this costs polish only.
+                empty += 1
+        # Flush after each batch so a later crash never discards earlier work.
+        if pending:
+            flush(pending)
+            done += len(pending)
+            pending = []
+            print(f"  {done} written so far", flush=True)
 
-    flush(pending)
-    done += len(pending)
     print(f"  {done} written, {failed} failed, {empty} returned nothing "
           f"({len(leads)} attempted)")
     return done
@@ -210,6 +298,10 @@ def _selfcheck():
     # a lead with no rating data must not let ANY number through
     assert unverified_numbers("rated 5 stars", thin) == {"5"}
     assert allowed_numbers(thin) == set()
+    # batch alignment mirrors judge's: echoed "i" wins, else positional
+    assert _align([{"i": 1}, {"i": 0}], 2) == [{"i": 0}, {"i": 1}]
+    assert _align([{"a": 1}], 2) == [{"a": 1}, None]
+    assert _align("not a list" and [], 1) == [None]
     print("pitch selfcheck ok")
 
 

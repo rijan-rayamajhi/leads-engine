@@ -24,6 +24,15 @@ services:
   - mobile_app
   - custom_software
 
+
+# LLM batching + per-run cap. Fewer, bigger calls stay under the free-tier
+# request quota; the cap keeps one run inside the 30-min CI window and leaves
+# the rest for the next cron (every 6h). Raise batch_size for fewer calls,
+# lower it if a model truncates long JSON.
+llm:
+  batch_size: 15        # leads classified/pitched per LLM call
+  max_per_run: 200      # most leads to send to the LLM in one run
+
 thresholds:            # intent_score buckets
   hot: 90
   warm: 70

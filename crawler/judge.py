@@ -47,6 +47,18 @@ service=none and score<30.
 
 INTENT_MULT = {"actively_seeking": 1.0, "has_problem": 0.85, "vague": 0.5}
 
+# Batch header: same rules as PROMPT, but classify a numbered LIST in one call.
+# One call for 15 leads instead of 15 calls keeps us under the free request cap.
+PROMPT_BATCH = PROMPT + """
+You are given a NUMBERED LIST of items below. Classify EVERY item.
+
+Return ONLY compact JSON, exactly one object per item, SAME ORDER, echoing the
+item number as "i":
+{"results":[{"i":0,"has_problem":bool,"service":"website|chatbot|whatsapp_bot|ai_phone|mobile_app|custom_software|none","intent":"actively_seeking|has_problem|vague","summary":"<=12 words","why_contact":"<=15 words","score":0-100}, ...]}
+
+ITEMS:
+"""
+
 
 def passes_rules(text: str) -> bool:
     t = (text or "").lower()
@@ -96,10 +108,33 @@ def final_score(llm_score, intent, source_weight, posted_at, source="google_revi
     return max(0, min(100, round(base + bonus)))
 
 
-def classify(key, sig) -> dict:
-    return llm.ask_json(
-        PROMPT + f"\nSOURCE: {sig['source']}\nBUSINESS: {sig.get('who','')}\n"
-                 f"TEXT: {sig.get('text','')}", key)
+def _align(results, n):
+    """Map an LLM results array back to n inputs. Prefer the echoed "i" index;
+    fall back to position when the model returns a clean same-length list. A
+    slot with no matching result is None, so its row is simply skipped."""
+    by_i = {}
+    for r in results:
+        if isinstance(r, dict):
+            try:
+                by_i[int(r["i"])] = r
+            except (KeyError, TypeError, ValueError):
+                pass
+    if len(by_i) == n and set(by_i) == set(range(n)):
+        return [by_i[i] for i in range(n)]
+    return [results[i] if i < len(results) and isinstance(results[i], dict) else None
+            for i in range(n)]
+
+
+def classify_batch(key, sigs) -> list:
+    """Classify many signals in one call. Returns a list aligned to `sigs`
+    (None where the model gave nothing usable for that item)."""
+    body = "\n".join(
+        f"[{i}] SOURCE: {s['source']} | BUSINESS: {s.get('who','')} | "
+        f"TEXT: {s.get('text','')}"
+        for i, s in enumerate(sigs))
+    out = llm.ask_json(PROMPT_BATCH + body, key)
+    results = out.get("results", []) if isinstance(out, dict) else []
+    return _align(results, len(sigs))
 
 
 def run(limit=None):
@@ -121,23 +156,52 @@ def run(limit=None):
                 "update raw_signals set judged_at=now(), intent_score=0, "
                 "service='none', intent='vague' where id = any(%s)", (drop_ids,))
     survivors = [r for r in rows if r[0] not in set(drop_ids)]
-    print(f"judging {len(rows)}: {len(drop_ids)} dropped by rules, {len(survivors)} -> LLM")
+
+    # Per-run cap: send at most max_per_run to the LLM, highest-signal first is
+    # not needed here (all survivors are candidates), so newest-first as read.
+    # The rest keep judged_at=null and are picked up by the next cron.
+    lc = cfg.get("llm", {})
+    cap = int(lc.get("max_per_run", 200))
+    size = int(lc.get("batch_size", 15))
+    capped = len(survivors) > cap
+    survivors = survivors[:cap]
+    print(f"judging {len(rows)}: {len(drop_ids)} dropped by rules, "
+          f"{len(survivors)} -> LLM in batches of {size}"
+          + (f" (capped, {cap} of many; rest next run)" if capped else ""))
 
     # 2. Slow LLM calls with NO DB connection held (network-drop safe).
+    #    One call per batch of `size` signals, not one per signal.
     updates = []
-    for i, (sid, source, who, body, posted_at) in enumerate(survivors):
-        if i:
+    for b, chunk in enumerate(batched(survivors, size)):
+        if b:
             time.sleep(llm.PACE)
+        sigs = [{"source": src, "who": who, "text": body}
+                for (_, src, who, body, _) in chunk]
         try:
-            r = classify(key, {"source": source, "who": who, "text": body})
-        except Exception as e:  # ponytail: skip a bad row, don't kill the run
-            print(f"  classify failed id={sid}: {e}", file=sys.stderr)
+            results = classify_batch(key, sigs)
+        except llm.RateLimitError:
+            # Quota is spent; the rest will 429 too. Stop now instead of burning
+            # the 30-min CI budget one backoff at a time — resume next run.
+            print(f"  rate-limited, stopping after {len(updates)} classified",
+                  file=sys.stderr)
+            break
+        except Exception as e:  # ponytail: lose one batch, not the whole run
+            print(f"  classify batch failed ({len(chunk)} rows): {e}", file=sys.stderr)
             continue
-        score = final_score(int(r.get("score", 0)), r.get("intent", "vague"),
-                            weights.get(source, 1.0), posted_at, source,
-                            svc_weights.get(r.get("service"), 1.0))
-        updates.append((r.get("service"), r.get("intent"), score,
-                        r.get("summary"), r.get("why_contact"), sid))
+        for (sid, source, _who, _body, posted_at), r in zip(chunk, results, strict=True):
+            if not r:
+                print(f"  classify: no result for id={sid}", file=sys.stderr)
+                continue
+            try:
+                llm_score = int(r.get("score", 0))
+            except (TypeError, ValueError):
+                print(f"  classify: bad score for id={sid}", file=sys.stderr)
+                continue
+            score = final_score(llm_score, r.get("intent", "vague"),
+                                weights.get(source, 1.0), posted_at, source,
+                                svc_weights.get(r.get("service"), 1.0))
+            updates.append((r.get("service"), r.get("intent"), score,
+                            r.get("summary"), r.get("why_contact"), sid))
 
     # 3. Write results in short DB sessions, a batch at a time. Holding them
     # all until the end meant one late failure discarded every earlier result.
@@ -170,6 +234,11 @@ def _selftest():
     now = datetime.now(UTC)
     assert (final_score(80, "has_problem", 1.0, now, service_weight=1.4)
             > final_score(80, "has_problem", 1.0, now, service_weight=0.6))
+    # batch alignment: echoed "i" wins; falls back to position; missing -> None
+    assert _align([{"i": 1, "x": "b"}, {"i": 0, "x": "a"}], 2) == [{"i":0,"x":"a"},{"i":1,"x":"b"}]
+    assert _align([{"x": "a"}, {"x": "b"}], 2) == [{"x": "a"}, {"x": "b"}]   # no i -> positional
+    assert _align([{"x": "a"}], 2) == [{"x": "a"}, None]                     # short list padded
+    assert _align([], 2) == [None, None]
     print("selftest OK")
 
 
