@@ -19,7 +19,10 @@ function Meter({ pct }: { pct: number }) {
 
 function Table({ title, icon, rows }: { title: string; icon: React.ReactNode; rows: Breakdown[] }) {
   return (
-    <section className="flex flex-col gap-3 rounded-card bg-surface p-5 shadow-card">
+    /* min-w-0: a grid item defaults to min-width:auto, so without this the card
+       is sized by the table inside it and the whole PAGE scrolls sideways on a
+       phone instead of just the table. Measured +244px at 320px wide. */
+    <section className="flex min-w-0 flex-col gap-3 rounded-card bg-surface p-5 shadow-card">
       <h2 className="flex items-center gap-2 font-semibold">
         {icon}
         {title}
@@ -28,14 +31,16 @@ function Table({ title, icon, rows }: { title: string; icon: React.ReactNode; ro
         <p className="text-sm text-muted">Nothing yet.</p>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-lg text-sm">
+        {/* Worked and Lost fold away on a phone. Six columns only fit by
+            scrolling, and that pushed Win rate, the point of the page, off. */}
+        <table className="w-full text-sm sm:min-w-lg">
           <thead className="text-xs text-muted">
             <tr className="text-left">
               <th className="pb-2 font-normal">Name</th>
               <th className="pb-2 text-right font-normal">Leads</th>
-              <th className="pb-2 text-right font-normal">Worked</th>
+              <th className="hidden pb-2 text-right font-normal sm:table-cell">Worked</th>
               <th className="pb-2 text-right font-normal">Won</th>
-              <th className="pb-2 text-right font-normal">Lost</th>
+              <th className="hidden pb-2 text-right font-normal sm:table-cell">Lost</th>
               <th className="pb-2 pl-4 font-normal">Win rate</th>
             </tr>
           </thead>
@@ -46,9 +51,9 @@ function Table({ title, icon, rows }: { title: string; icon: React.ReactNode; ro
                 <tr key={r.key} className="border-t border-line">
                   <td className="py-2 pr-2 font-medium">{r.key}</td>
                   <td className="py-2 text-right tabular-nums">{r.total}</td>
-                  <td className="py-2 text-right tabular-nums text-muted">{r.worked}</td>
+                  <td className="hidden py-2 text-right tabular-nums text-muted sm:table-cell">{r.worked}</td>
                   <td className="py-2 text-right tabular-nums">{r.won}</td>
-                  <td className="py-2 text-right tabular-nums">{r.lost}</td>
+                  <td className="hidden py-2 text-right tabular-nums sm:table-cell">{r.lost}</td>
                   <td className="py-2 pl-4">
                     {enough ? (
                       <span className="flex items-center gap-2">
@@ -142,12 +147,12 @@ export default async function AnalyticsPage() {
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         <Table title="By source" icon={<Radio size={16} strokeWidth={2} />} rows={by("source")} />
         <Table title="By service" icon={<Package size={16} strokeWidth={2} />} rows={by("service")} />
         <Table title="By score bucket" icon={<Gauge size={16} strokeWidth={2} />} rows={by("bucket")} />
 
-        <section className="flex flex-col gap-3 rounded-card bg-surface p-5 shadow-card">
+        <section className="flex min-w-0 flex-col gap-3 rounded-card bg-surface p-5 shadow-card">
           <h2 className="flex items-center gap-2 font-semibold">
             <SlidersHorizontal size={16} strokeWidth={2} />
             Source weights

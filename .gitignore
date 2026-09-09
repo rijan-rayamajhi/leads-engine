@@ -8,3 +8,5 @@ web/.next/
 web/.env.local
 .serena/
 web/tsconfig.tsbuildinfo
+
+.DS_Store

@@ -169,7 +169,9 @@ export default async function LeadPage({
       </section>
 
       {/* the reference's segmented bar: done = green + check, current = yellow + clock */}
-      <div className={`-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 ${lost ? "opacity-50" : ""}`}>
+      {/* min-w-0 for the same reason as the analytics cards: a flex child sized
+          by its content makes the page scroll sideways rather than the strip. */}
+      <div className={`-mx-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 pb-1 ${lost ? "opacity-50" : ""}`}>
         {FLOW.map((s, i) => {
           const done = !lost && i < at;
           const now = !lost && i === at;
@@ -280,7 +282,7 @@ export default async function LeadPage({
           </section>
         </div>
 
-        <section className="flex h-fit flex-col gap-5 rounded-card bg-surface p-6 shadow-card">
+        <section className="flex h-fit min-w-0 flex-col gap-5 rounded-card bg-surface p-6 shadow-card">
           {/* tab strip, data-driven so Outreach is one more entry later */}
           <nav className="flex gap-2">
             {[
@@ -317,7 +319,9 @@ export default async function LeadPage({
                   maxLength={2000}
                   required
                   placeholder="Take a note. What was said on the call?"
-                  className={`${FIELD} flex-1 resize-y rounded-2xl py-2.5`}
+                  /* min-w-0: a textarea carries an intrinsic width from its
+                     cols default, which as a flex item refuses to shrink. */
+                  className={`${FIELD} min-w-0 flex-1 resize-y rounded-2xl py-2.5`}
                 />
                 <button className={BTN}>
                   Add

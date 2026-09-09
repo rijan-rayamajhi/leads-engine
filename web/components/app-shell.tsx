@@ -97,7 +97,8 @@ export default function AppShell({
 
       {/* pb clears the fixed bottom bar on phones */}
       <div className="flex min-w-0 flex-1 flex-col gap-4 pb-20 sm:pb-0">
-        <header className={`flex items-center gap-3 ${scoped ? "" : "sm:hidden"}`}>
+        {/* wraps at 320px, where logo + market + account is 309px of content */}
+        <header className={`flex flex-wrap items-center gap-3 ${scoped ? "" : "sm:hidden"}`}>
           <Logo className="sm:hidden" />
           {scoped && (
           <form action={setMarket}>
@@ -125,7 +126,9 @@ export default function AppShell({
             >
               {email[0]?.toUpperCase()}
             </span>
-            <button className="text-sm text-muted transition hover:text-ink">Sign out</button>
+            <button className="flex h-9 items-center rounded-pill px-3 text-sm text-muted transition hover:text-ink">
+              Sign out
+            </button>
           </form>
         </header>
 

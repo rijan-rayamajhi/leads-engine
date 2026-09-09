@@ -186,7 +186,9 @@ export default function Board({ leads, me }: { leads: Lead[]; me: string }) {
         </div>
       ) : (
         <>
-          <section className="grid gap-3 xl:grid-cols-2">
+          {/* Two columns from a landscape tablet, three on a wide desktop. Below
+              lg the footer row (phone, status, claim) wraps, so one column. */}
+          <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
             {slice.map((l) => (
               <LeadCard key={l.id} lead={l} me={me} onStatus={changeStatus} onClaim={claim} />
             ))}

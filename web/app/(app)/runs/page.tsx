@@ -56,13 +56,15 @@ export default async function RunsPage() {
           <p className="text-sm text-muted">Nothing yet. The next run writes a row here.</p>
         ) : (
           <div className="-mx-1 overflow-x-auto px-1">
-        <table className="w-full min-w-lg text-sm">
+        {/* Took and Signals fold away on a phone, so Result stays on screen:
+            this page exists to answer "did the cron run and did it work?". */}
+        <table className="w-full text-sm sm:min-w-lg">
             <thead className="text-xs text-muted">
               <tr className="text-left">
                 <th className="pb-2 font-normal">Job</th>
                 <th className="pb-2 font-normal">Started</th>
-                <th className="pb-2 text-right font-normal">Took</th>
-                <th className="pb-2 text-right font-normal">Signals</th>
+                <th className="hidden pb-2 text-right font-normal sm:table-cell">Took</th>
+                <th className="hidden pb-2 text-right font-normal sm:table-cell">Signals</th>
                 <th className="pb-2 text-right font-normal">Leads</th>
                 <th className="pb-2 pl-4 font-normal">Result</th>
               </tr>
@@ -101,8 +103,8 @@ export default async function RunsPage() {
                         </span>
                       )}
                     </td>
-                    <td className="py-2 text-right tabular-nums text-muted">{took(r)}</td>
-                    <td className="py-2 text-right tabular-nums">{r.signals_new ?? "-"}</td>
+                    <td className="hidden py-2 text-right tabular-nums text-muted sm:table-cell">{took(r)}</td>
+                    <td className="hidden py-2 text-right tabular-nums sm:table-cell">{r.signals_new ?? "-"}</td>
                     <td className="py-2 text-right tabular-nums">{r.leads_new ?? "-"}</td>
                     <td className="py-2 pl-4">
                       <span
