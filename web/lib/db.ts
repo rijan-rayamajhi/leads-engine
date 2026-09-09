@@ -1,4 +1,5 @@
 import { neon } from "@neondatabase/serverless";
+import { unstable_cache } from "next/cache";
 import { LEAD_LIMIT } from "./leads";
 import { DEFAULTS, type Settings } from "./settings";
 
@@ -32,7 +33,7 @@ export type Lead = {
  *  opening a call with a claim the prospect can disprove is worse than silence.
  *  ponytail: capped at 500 and filtered in the browser. Instant, and 83 rows
  *  today. Move filters into this WHERE when the cap starts biting. */
-export async function listLeads(market = "all") {
+async function listLeadsRaw(market = "all") {
   return (await sql`
     select id, name, phone, email, service, what_they_want, evidence_quote,
            why_contact, source, source_url, intent_score, bucket, status,
@@ -175,7 +176,7 @@ export async function getSettings(): Promise<Settings & { updated_by: string | n
 }
 
 /** Markets that actually have leads; the switcher never offers an empty one. */
-export async function getMarkets(): Promise<string[]> {
+async function getMarketsRaw(): Promise<string[]> {
   const rows = (await sql`
     select city, count(*)::int as n from leads
     where city is not null group by city order by n desc`) as { city: string }[];
@@ -230,3 +231,19 @@ export async function activeAdminCount(): Promise<number> {
   `) as { n: number }[];
   return r.n;
 }
+
+/* listLeads/getMarkets hit a remote Neon DB (ap-southeast-1) on every page
+   load. Cache them so navigation doesn't pay that round trip each time. The
+   "leads" tag is busted by lead mutations (see app/actions.ts); the TTL is a
+   backstop for crawler-inserted rows that don't go through an action.
+   ponytail: market lens is a coarse key, fine at 83 rows. */
+export const listLeads = unstable_cache(listLeadsRaw, ["listLeads"], {
+  tags: ["leads"],
+  revalidate: 30,
+});
+
+// Cities change only when the crawler finds a new market — a slow TTL is plenty.
+export const getMarkets = unstable_cache(getMarketsRaw, ["getMarkets"], {
+  tags: ["leads"],
+  revalidate: 300,
+});

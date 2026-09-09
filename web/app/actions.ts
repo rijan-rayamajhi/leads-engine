@@ -1,7 +1,7 @@
 "use server";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { requireAdmin, requireSession, signIn, signOut } from "@/lib/auth";
 import { activeAdminCount, findUserWithHash, sql } from "@/lib/db";
 import { checkPassword, hashPassword, verifyPassword } from "@/lib/password";
@@ -60,6 +60,7 @@ export async function setStatus(id: string, status: string) {
   await sql`update leads set status = ${status} where id = ${id}`;
   await sql`insert into outcomes (lead_id, user_email, status)
             values (${id}, ${email}, ${status})`;
+  updateTag("leads");
   revalidatePath("/");
   revalidatePath(`/leads/${id}`);
 }
@@ -72,6 +73,7 @@ export async function toggleClaim(id: string) {
        set assigned_to = case when assigned_to = ${email} then null else ${email} end
      where id = ${id} and (assigned_to is null or assigned_to = ${email})
     returning assigned_to`) as { assigned_to: string | null }[];
+  updateTag("leads");
   revalidatePath("/");
   revalidatePath(`/leads/${id}`);
   return { ok: !!row, assigned_to: row?.assigned_to ?? null };

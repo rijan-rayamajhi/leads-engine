@@ -2,6 +2,7 @@
  *  The role is loaded from the users table on every request, so demoting or
  *  disabling someone takes effect immediately instead of when a 30-day token
  *  expires. */
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { SignJWT, jwtVerify } from "jose";
@@ -127,12 +128,14 @@ async function tokenEmail(): Promise<string | null> {
   }
 }
 
-export async function getSession(): Promise<Session | null> {
+// cache() dedupes the session DB lookup within one request: the (app) layout
+// and every page both call requireSession, and this collapses that to one query.
+export const getSession = cache(async (): Promise<Session | null> => {
   const email = await tokenEmail();
   if (!email) return null;
   const u = await activeUser(email); // null when missing or disabled
   return u ? { email: u.email, role: u.role, mustChange: u.must_change } : null;
-}
+});
 
 export async function requireSession(): Promise<Session> {
   const s = await getSession();
