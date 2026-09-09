@@ -140,7 +140,7 @@ def classify_batch(key, sigs) -> list:
 def run(limit=None):
     load_env()
     cfg = load_config()
-    key = llm.key()
+    llm.all_keys()   # fail fast if no OPENROUTER key is configured
     weights = cfg["source_weights"]
     svc_weights = cfg.get("service_weights", {})
 
@@ -178,7 +178,7 @@ def run(limit=None):
         sigs = [{"source": src, "who": who, "text": body}
                 for (_, src, who, body, _) in chunk]
         try:
-            results = classify_batch(key, sigs)
+            results = classify_batch(None, sigs)
         except llm.RateLimitError:
             # Quota is spent; the rest will 429 too. Stop now instead of burning
             # the 30-min CI budget one backoff at a time — resume next run.

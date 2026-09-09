@@ -24,6 +24,7 @@ jobs:
       DATABASE_URL:          ${{ secrets.DATABASE_URL }}
       GOOGLE_PLACES_KEY:     ${{ secrets.GOOGLE_PLACES_KEY }}
       OPENROUTER_API_KEY:    ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_API_KEY_2:  ${{ secrets.OPENROUTER_API_KEY_2 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

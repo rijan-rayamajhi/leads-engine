@@ -33,11 +33,30 @@ RETRIES = 4
 BACKOFF = 6     # seconds, multiplied by the attempt number
 
 
-def key():
-    k = os.environ.get("OPENROUTER_API_KEY")
-    if not k:
+def all_keys():
+    """Every OpenRouter key, in priority order: OPENROUTER_API_KEY, then
+    OPENROUTER_API_KEY_2, _3, ... ask_json rotates to the next key when the
+    current one's free quota is spent (all-429), so a second key doubles the
+    daily budget. Set each as its own GitHub secret; never commit the value."""
+    keys, i = [], 1
+    while True:
+        name = "OPENROUTER_API_KEY" if i == 1 else f"OPENROUTER_API_KEY_{i}"
+        v = os.environ.get(name)
+        if v and v.strip():
+            keys.append(v.strip())
+        elif i > 1:
+            break        # stop at the first missing _N slot (keys are contiguous)
+        i += 1
+        if i > 10:
+            break
+    if not keys:
         raise RuntimeError("OPENROUTER_API_KEY not set")
-    return k
+    return keys
+
+
+def key():
+    """First key only. Kept for callers that want a single explicit key."""
+    return all_keys()[0]
 
 
 def _extract(text):
@@ -69,8 +88,10 @@ def _content(payload):
     return choices[0].get("message", {}).get("content")
 
 
-def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
-    """One call, returns the parsed JSON object.
+def _ask_once(prompt, api_key, json_mode, temperature):
+    """One key, up to RETRIES attempts. Returns the parsed JSON, or raises
+    RateLimitError if EVERY attempt was 429 (this key's quota is spent) or
+    TransientLLMError for any other exhausted-retry failure.
 
     Retries every transient class, not just 429. A long batch on a laptop or a
     CI runner will hit connection resets, read timeouts and DNS blips; in one
@@ -81,7 +102,7 @@ def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
             "messages": [{"role": "user", "content": prompt}]}
     if json_mode:
         body["response_format"] = {"type": "json_object"}
-    headers = {"Authorization": f"Bearer {api_key or key()}",
+    headers = {"Authorization": f"Bearer {api_key}",
                "Content-Type": "application/json"}
 
     last = None
@@ -105,6 +126,25 @@ def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
     if all_429:
         raise RateLimitError(f"{RETRIES} attempts all 429 (free-model quota spent?)")
     raise TransientLLMError(f"{RETRIES} attempts failed, last: {last}")
+
+
+def ask_json(prompt, api_key=None, json_mode=True, temperature=0):
+    """One call, returns the parsed JSON object. Rotates through every
+    configured key: when a key's quota is spent (all-429) it switches to the
+    next and retries the same call. RateLimitError only escapes once EVERY key
+    is exhausted, so the batch's circuit breaker stops the run only when there
+    is genuinely no budget left anywhere."""
+    keys = [api_key] if api_key else all_keys()
+    last = None
+    for i, k in enumerate(keys):
+        try:
+            return _ask_once(prompt, k, json_mode, temperature)
+        except RateLimitError as e:
+            last = e
+            if i + 1 < len(keys):
+                print(f"  key #{i + 1} quota spent, switching to key #{i + 2}",
+                      file=sys.stderr)
+    raise last  # all keys 429 -> real quota wall, let the caller stop the batch
 
 
 def _selfcheck():

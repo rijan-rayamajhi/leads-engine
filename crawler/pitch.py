@@ -194,7 +194,7 @@ def clean(text, limit=MAX_CHARS):
 def run(limit=None):
     load_env()
     cfg = load_config()
-    key = llm.key()
+    llm.all_keys()   # fail fast if no OPENROUTER key is configured
 
     # Per-run cap: pitch the highest-intent leads first (SQL order), cap the
     # count; the rest keep their rule-written why_contact and pitch next cron.
@@ -232,7 +232,7 @@ def run(limit=None):
             time.sleep(llm.PACE)
         items = [(lead, lead["city"] or cfg.get("city")) for lead in chunk]
         try:
-            got = pitch_batch(items, key)
+            got = pitch_batch(items, None)
         except llm.RateLimitError:
             # Quota spent; remaining leads keep their accurate rule-written
             # why_contact and get pitched on the next run. Stop, don't grind.
