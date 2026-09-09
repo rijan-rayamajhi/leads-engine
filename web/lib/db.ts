@@ -97,7 +97,7 @@ export type Breakdown = {
 };
 
 /** Win rates per dimension: the same numbers crawler/feedback.py retunes on. */
-export async function analytics(market = "all") {
+async function analyticsRaw(market = "all") {
   const [funnel, breakdown] = await Promise.all([
     sql`select status, count(*)::int as n from leads
         where (${market} = 'all' or city = ${market}) group by status`,
@@ -140,7 +140,7 @@ export type Run = {
   error: string | null;
 };
 
-export async function getRuns(limit = 25, market = "all") {
+async function getRunsRaw(limit = 25, market = "all") {
   const [runs, ok] = await Promise.all([
     sql`select id, job, city, started_at, finished_at, signals_new, leads_new, stats, error
         from runs where (${market} = 'all' or city = ${market})
@@ -246,4 +246,18 @@ export const listLeads = unstable_cache(listLeadsRaw, ["listLeads"], {
 export const getMarkets = unstable_cache(getMarketsRaw, ["getMarkets"], {
   tags: ["leads"],
   revalidate: 300,
+});
+
+// Analytics counts derive from lead status, which updateTag("leads") busts on a
+// status change, so win rates stay fresh; the TTL is a backstop.
+export const analytics = unstable_cache(analyticsRaw, ["analytics"], {
+  tags: ["leads"],
+  revalidate: 30,
+});
+
+// Runs only change when the crawler writes a row (never from a user action), so
+// a short TTL is enough and no tag is needed to keep it correct.
+export const getRuns = unstable_cache(getRunsRaw, ["getRuns"], {
+  tags: ["leads"],
+  revalidate: 60,
 });
