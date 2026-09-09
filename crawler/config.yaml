@@ -36,7 +36,8 @@ freshness_ttl_days: 30
 
 # Region for phone numbers that arrive without a +country code (ISO 3166-1).
 # Must match the market in `city`, or valid local numbers get flagged invalid.
-phone_region: IN
+# Retargeting the city means changing this too: IN for India, NP for Nepal.
+phone_region: NP
 
 # How long a website health verdict stays fresh. The cron runs every 6h; without
 # this every run would re-fetch a few hundred homepages for no new information.

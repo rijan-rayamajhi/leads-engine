@@ -10,7 +10,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from common import load_env, load_config
 import db, scoring
 from sources import places
-import judge, enrich, verify, pitch
+import judge, enrich, verify
 from website_leads import city_for
 
 
@@ -31,6 +31,11 @@ def deliver(cfg):
         created = 0
         for (who, body, source, url, service, summary, why, score,
              company_id, phone, email) in rows:
+            # No phone, no email and no listing to open is not a lead, it is a
+            # row a rep cannot act on. `url` is the Maps listing, so this only
+            # ever fires on a signal that lost its source_url.
+            if not (phone or email or url):
+                continue
             db.insert_lead(
                 c, company_id=company_id, name=who, phone=phone, email=email,
                 service=service, what_they_want=summary, evidence_quote=body,
@@ -71,15 +76,10 @@ def run(city=None, skip=()):
                 stats["emails"] = enrich.run_leads()
             except Exception as e:
                 print(f"  email stage failed, leads stay phone-only: {e}", file=sys.stderr)
-        # Last on purpose: pitches are polish on leads that already exist, so a
-        # model outage costs nice copy, never a lead.
-        if "pitch" not in skip:
-            print("== PITCH ==")
-            try:
-                stats["pitched"] = pitch.run()
-            except Exception as e:
-                print(f"  pitch stage failed, leads keep their rule copy: {e}",
-                      file=sys.stderr)
+        # PITCH is not a stage here. It writes openers for every lead that
+        # lacks one, so it has to run after BOTH factories; crawl.yml calls
+        # pitch.py last. Running it here too pitched the judge's leads, then
+        # ran again for website_leads', for two model batches instead of one.
     except Exception as e:
         err = f"{type(e).__name__}: {e}"
         raise

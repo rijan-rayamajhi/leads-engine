@@ -99,7 +99,7 @@ lead-engine/
 │  ├─ lib/                      # db, auth, password, leads, settings, market
 │  └─ package.json
 ├─ schema.sql                   # Postgres tables (shared, idempotent)
-├─ .github/workflows/crawl.yml     # cron every 6h → pipeline.py + gap.py
+├─ .github/workflows/crawl.yml     # cron every 6h → pipeline.py + website_leads.py
 └─ .github/workflows/feedback.yml  # nightly → feedback.py
 ```
 
@@ -136,7 +136,7 @@ regardless of how large the city was.
 Reddit was removed: PRAW needs per-user credentials, the subreddits it searched
 are mostly US-based, and none of its posts named a local business we could call.
 Business phone/website/rating ride along in `raw_signals.raw`, so ENRICH and
-`gap.py` reuse them without a second billed call.
+`website_leads.py` reuse them without a second billed call.
 
 A failing category is caught and skipped; one bad search never kills the run.
 New signals upserted to `raw_signals` (conflict on `source_url` = skip).
@@ -191,7 +191,7 @@ costs the batch, never a stuck transaction.
 
 ## 4b. GAP — leads without an LLM
 
-`gap.py` is the second lead factory and, today, the only one producing output.
+`website_leads.py` is the second lead factory and, today, the only one producing output.
 It rereads the harvested businesses in `raw_signals.raw` and files a lead wherever
 the gap is a checkable fact rather than a judgement call:
 
@@ -335,7 +335,7 @@ Grouping by three dimensions rather than source alone is what makes the loop
 able to learn at all: with one live source, a source-only weight is structurally
 incapable of saying anything. "Clinics convert at 40%, gyms at 5%" is actionable.
 
-`judge.py` applies source × service; `gap.py` applies category. (Later) train a
+`judge.py` applies source × service; `website_leads.py` applies category. (Later) train a
 model on features once ≥ ~50 outcomes exist; the overlay interface won't change.
 
 > **Precondition.** `outcomes` is empty: nobody has called a lead yet, so the
@@ -402,7 +402,7 @@ services: [website, chatbot, whatsapp_bot, ai_phone, mobile_app, custom_software
 thresholds: {hot: 90, warm: 70, qualified: 50}
 source_weights: {google_reviews: 1.0}
 freshness_ttl_days: 30
-phone_region: IN        # ISO region for numbers with no +country code
+phone_region: NP        # ISO region for numbers with no +country code; must match `city`
 ```
 
 Three layers, last one wins: `config.yaml` → `weights.json` (written nightly by
@@ -421,12 +421,12 @@ Two workflows, both with `workflow_dispatch` for manual runs:
 
 | Workflow | Cron | Does |
 |----------|------|------|
-| `crawl.yml` | `0 */6 * * *` | `pipeline.py --once` then `gap.py`. Accepts a `city` input to retarget one run. `concurrency: crawl` so two never overlap. |
+| `crawl.yml` | `0 */6 * * *` | `pipeline.py --once`, then `website_leads.py`, then `pitch.py`. Pitch runs last, once, because it writes an opener for every lead that lacks one and so must see both factories' output. Accepts a `city` input to retarget one run. `concurrency: crawl` so two never overlap. |
 | `feedback.yml` | `0 2 * * *` | `feedback.py`, then commits `weights.json` if it changed. |
 
 Secrets: `DATABASE_URL`, `GOOGLE_PLACES_KEY`, `OPENROUTER_API_KEY`.
 
-`--city` sets `CRAWL_CITY`, which both `places.py` and `gap.py` read, so a
+`--city` sets `CRAWL_CITY`, which both `places.py` and `website_leads.py` read, so a
 retargeted run tags its leads with the market it actually scanned.
 
 ---
@@ -468,7 +468,7 @@ retargeted run tags its leads with the market it actually scanned.
 3. `judge.py` (rules + LLM)
 4. `enrich.py` + `verify.py`
 5. `pipeline.py --once` end-to-end → rows in Postgres
-6. `gap.py` (the factory that actually produces leads)
+6. `website_leads.py` (the factory that actually produces leads)
 7. Next.js dashboard: board, detail, analytics, runs, settings
 8. Email/password auth, roles, team management
 9. GitHub Actions cron + nightly feedback retune
@@ -496,7 +496,7 @@ exists.
 | NextAuth magic-link + Resend | email/password, custom JWT + scrypt | no mail provider to own, and admin-provisioned accounts suit a small team |
 | `GET/PATCH /api/leads` | server actions in `app/actions.ts` | one place to authorize, nothing to keep in sync |
 | `judged` table | columns on `raw_signals` | one row per signal, no join |
-| one lead factory | two (`pipeline.py`, `gap.py`) | verifiable gaps beat LLM judgement on aged reviews |
+| one lead factory | two (`pipeline.py`, `website_leads.py`) | verifiable gaps beat LLM judgement on aged reviews |
 | single city | markets, DB-backed settings | retarget without a commit; leads keep the city they were found in |
 | gap = missing `websiteUri` | website health check (`sitecheck.py`) | 82% of the harvest was skipped for having a non-empty URL field |
 | weights per source | per source, service and category | one live source cannot teach a source-only weight anything |

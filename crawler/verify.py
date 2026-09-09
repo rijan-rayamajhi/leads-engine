@@ -73,7 +73,7 @@ def run(dupe_threshold=92):
                  and same_business(place_id, phone, kpid, kphone)), None)
             if match:
                 # Every referrer must move before the delete, or the leads FK
-                # aborts the whole run. gap.py leads all carry a company_id.
+                # aborts the whole run. website_leads.py leads all carry a company_id.
                 c.execute("update raw_signals set company_id=%s where company_id=%s",
                           (match, cid))
                 c.execute("update leads set company_id=%s where company_id=%s",
